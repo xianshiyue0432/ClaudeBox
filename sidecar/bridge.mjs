@@ -56,22 +56,33 @@ function preflight() {
 /**
  * Create a wrapper script around `claude` that tees stderr to a temp file.
  * Returns { wrapperPath, stderrPath, cleanup }.
+ * On Windows, creates a .cmd batch file. On Unix, creates a bash script.
  */
 function createClaudeWrapper() {
+  const isWindows = process.platform === "win32";
   const dir = mkdtempSync(join(tmpdir(), "claudebox-"));
   const stderrPath = join(dir, "claude-stderr.log");
-  const wrapperPath = join(dir, "claude-wrapper.sh");
 
   // Find real claude path
   let claudePath = "claude";
   try {
-    claudePath = execSync("which claude", { encoding: "utf-8", env: cleanEnv() }).trim();
+    const findCmd = isWindows ? "where claude" : "which claude";
+    const found = execSync(findCmd, { encoding: "utf-8", env: cleanEnv() }).trim();
+    // `where` on Windows may return multiple lines; take the first
+    claudePath = found.split(/\r?\n/)[0];
   } catch { /* use default */ }
 
-  writeFileSync(wrapperPath, `#!/bin/bash
-exec "${claudePath}" "$@" 2> >(tee "${stderrPath}" >&2)
-`);
-  chmodSync(wrapperPath, 0o755);
+  let wrapperPath;
+  if (isWindows) {
+    // Windows: .cmd batch file that redirects stderr to file
+    wrapperPath = join(dir, "claude-wrapper.cmd");
+    writeFileSync(wrapperPath, `@echo off\r\n"${claudePath}" %* 2> "${stderrPath}"\r\n`);
+  } else {
+    // Unix: bash script with tee to capture stderr while keeping it visible
+    wrapperPath = join(dir, "claude-wrapper.sh");
+    writeFileSync(wrapperPath, `#!/bin/bash\nexec "${claudePath}" "$@" 2> >(tee "${stderrPath}" >&2)\n`);
+    chmodSync(wrapperPath, 0o755);
+  }
 
   return {
     wrapperPath,

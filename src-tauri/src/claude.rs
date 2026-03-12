@@ -8,46 +8,59 @@ use tauri::{AppHandle, Emitter, State};
 // ── Shell environment resolution ─────────────────────────────────────
 // macOS .app bundles don't inherit shell env vars (ANTHROPIC_API_KEY, etc.)
 // We capture the full login shell environment once and apply it to child processes.
+// On Windows, the process already inherits the full environment, so we just collect it.
 
 fn get_shell_env() -> &'static HashMap<String, String> {
     static CACHED_ENV: OnceLock<HashMap<String, String>> = OnceLock::new();
     CACHED_ENV.get_or_init(|| {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-        // Run login shell to dump the full environment
-        if let Ok(output) = Command::new(&shell)
-            .args(["-ilc", "env"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()
+        #[cfg(unix)]
         {
-            if output.status.success() {
-                let mut env_map = HashMap::new();
-                let text = String::from_utf8_lossy(&output.stdout);
-                for line in text.lines() {
-                    if let Some((key, value)) = line.split_once('=') {
-                        // Skip problematic keys
-                        if key.is_empty() || key.starts_with('_') || key == "PWD"
-                            || key == "OLDPWD" || key == "SHLVL"
-                            || key == "CLAUDECODE" {
-                            continue;
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+            // Run login shell to dump the full environment
+            if let Ok(output) = Command::new(&shell)
+                .args(["-ilc", "env"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output()
+            {
+                if output.status.success() {
+                    let mut env_map = HashMap::new();
+                    let text = String::from_utf8_lossy(&output.stdout);
+                    for line in text.lines() {
+                        if let Some((key, value)) = line.split_once('=') {
+                            // Skip problematic keys
+                            if key.is_empty() || key.starts_with('_') || key == "PWD"
+                                || key == "OLDPWD" || key == "SHLVL"
+                                || key == "CLAUDECODE" {
+                                continue;
+                            }
+                            env_map.insert(key.to_string(), value.to_string());
                         }
-                        env_map.insert(key.to_string(), value.to_string());
+                    }
+                    if !env_map.is_empty() {
+                        return env_map;
                     }
                 }
-                if !env_map.is_empty() {
-                    return env_map;
-                }
             }
+            // Fallback: at least set a good PATH
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/user".to_string());
+            let mut fallback = HashMap::new();
+            fallback.insert("PATH".to_string(), format!(
+                "/opt/homebrew/bin:/usr/local/bin:{}/.nvm/versions/node/default/bin:{}/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+                home, home
+            ));
+            fallback.insert("HOME".to_string(), home);
+            fallback
         }
-        // Fallback: at least set a good PATH
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/user".to_string());
-        let mut fallback = HashMap::new();
-        fallback.insert("PATH".to_string(), format!(
-            "/opt/homebrew/bin:/usr/local/bin:{}/.nvm/versions/node/default/bin:{}/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            home, home
-        ));
-        fallback.insert("HOME".to_string(), home);
-        fallback
+
+        #[cfg(windows)]
+        {
+            // Windows: process already inherits the full environment from the shell
+            // Just collect it and remove CLAUDECODE
+            let mut env_map: HashMap<String, String> = std::env::vars().collect();
+            env_map.remove("CLAUDECODE");
+            env_map
+        }
     })
 }
 
@@ -424,7 +437,17 @@ pub fn stop_session(
     let mut pids = state.running_pids.lock().map_err(|e| e.to_string())?;
     if let Some(pid) = pids.remove(&session_id) {
         emit_debug(&app, &session_id, "process", &format!("Killing PID {}", pid));
+        #[cfg(unix)]
         unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+        #[cfg(windows)]
+        {
+            // Windows: use taskkill to terminate the process tree
+            let _ = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
+        }
     }
     Ok(())
 }
