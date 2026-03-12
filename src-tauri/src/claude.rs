@@ -246,21 +246,32 @@ pub struct SendMessageRequest {
 
 // ── Commands ─────────────────────────────────────────────────────────
 
+/// Check whether the Claude CLI is reachable.
+/// Runs `claude --version` in a background thread with a 10-second timeout so
+/// that a slow PATH search on Windows can never freeze the UI at startup.
 #[tauri::command]
-pub fn check_claude_installed(claude_path: Option<String>) -> Result<String, String> {
+pub async fn check_claude_installed(claude_path: Option<String>) -> Result<String, String> {
     let cmd = claude_path.unwrap_or_else(|| "claude".to_string());
-    match command_with_path(&cmd).arg("--version").output() {
-        Ok(output) => {
-            if output.status.success() {
-                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-            } else {
-                Err(format!(
-                    "claude CLI error: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ))
-            }
+    let cmd_for_err = cmd.clone();
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(command_with_path(&cmd).arg("--version").output());
+    });
+
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(Ok(output)) if output.status.success() => {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
         }
-        Err(e) => Err(format!("claude CLI not found at '{}': {}", cmd, e)),
+        Ok(Ok(output)) => Err(format!(
+            "claude CLI error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )),
+        Ok(Err(e)) => Err(format!("claude CLI not found at '{}': {}", cmd_for_err, e)),
+        Err(_) => Err(format!(
+            "claude CLI check timed out (10s) — '{}' may not be installed or PATH is slow",
+            cmd_for_err
+        )),
     }
 }
 
