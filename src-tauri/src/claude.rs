@@ -99,10 +99,16 @@ fn get_shell_env() -> &'static HashMap<String, String> {
 fn command_with_path(program: &str) -> Command {
     // On Windows, wrap with `cmd /c` so that .cmd/.bat scripts (e.g. claude.cmd
     // from npm global install) are resolved via PATHEXT.
+    // CREATE_NO_WINDOW (0x0800_0000) prevents a visible console window from
+    // flashing on screen — without it every spawned cmd.exe briefly shows a
+    // black terminal window which is jarring for GUI users.
     #[cfg(windows)]
     let mut cmd = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let mut c = Command::new("cmd");
         c.args(["/C", program]);
+        c.creation_flags(CREATE_NO_WINDOW);
         c
     };
     #[cfg(not(windows))]
@@ -530,10 +536,14 @@ pub fn stop_session(
         #[cfg(windows)]
         {
             // Windows: use taskkill to terminate the process tree
+            // CREATE_NO_WINDOW prevents console window flash
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
             let _ = Command::new("taskkill")
                 .args(["/PID", &pid.to_string(), "/T", "/F"])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
                 .spawn();
         }
     }

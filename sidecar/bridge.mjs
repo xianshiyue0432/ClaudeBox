@@ -45,7 +45,12 @@ function preflight() {
 
   // Check claude is accessible
   try {
-    const ver = execSync("claude --version", { encoding: "utf-8", timeout: 5000, env: cleanEnv() }).trim();
+    const ver = execSync("claude --version", {
+      encoding: "utf-8",
+      timeout: 5000,
+      env: cleanEnv(),
+      windowsHide: true,
+    }).trim();
     console.error(`[bridge] claude --version: ${ver}`);
   } catch (e) {
     console.error(`[bridge] claude --version FAILED: ${e.message}`);
@@ -70,7 +75,7 @@ function createClaudeWrapper() {
   let claudePath = "claude";
   try {
     const findCmd = isWindows ? "where claude" : "which claude";
-    const found = execSync(findCmd, { encoding: "utf-8", env: cleanEnv() }).trim();
+    const found = execSync(findCmd, { encoding: "utf-8", env: cleanEnv(), windowsHide: true }).trim();
     // `where` on Windows may return multiple lines; take the first
     claudePath = found.split(/\r?\n/)[0];
   } catch { /* use default */ }
