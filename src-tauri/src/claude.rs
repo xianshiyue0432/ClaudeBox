@@ -55,17 +55,59 @@ fn get_shell_env() -> &'static HashMap<String, String> {
 
         #[cfg(windows)]
         {
-            // Windows: process already inherits the full environment from the shell
-            // Just collect it and remove CLAUDECODE
+            // Windows: process already inherits the full environment from the shell.
+            // However, when launched from GUI (not terminal), npm global path may not
+            // be in PATH. We ensure %APPDATA%\npm and %LOCALAPPDATA%\pnpm are included.
             let mut env_map: HashMap<String, String> = std::env::vars().collect();
             env_map.remove("CLAUDECODE");
+
+            // Ensure npm/pnpm global bin dirs are in PATH
+            let mut extra_paths: Vec<String> = Vec::new();
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                let npm_dir = format!("{}\\npm", appdata);
+                extra_paths.push(npm_dir);
+            }
+            if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+                let pnpm_dir = format!("{}\\pnpm", localappdata);
+                extra_paths.push(pnpm_dir);
+            }
+            if !extra_paths.is_empty() {
+                let current_path = env_map.get("Path")
+                    .or_else(|| env_map.get("PATH"))
+                    .cloned()
+                    .unwrap_or_default();
+                let current_lower = current_path.to_lowercase();
+                let missing: Vec<&String> = extra_paths.iter()
+                    .filter(|p| !current_lower.contains(&p.to_lowercase()))
+                    .collect();
+                if !missing.is_empty() {
+                    let new_path = format!("{};{}", current_path, missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(";"));
+                    // Windows PATH key can be "Path" or "PATH" — update whichever exists
+                    if env_map.contains_key("Path") {
+                        env_map.insert("Path".to_string(), new_path);
+                    } else {
+                        env_map.insert("PATH".to_string(), new_path);
+                    }
+                }
+            }
+
             env_map
         }
     })
 }
 
 fn command_with_path(program: &str) -> Command {
+    // On Windows, wrap with `cmd /c` so that .cmd/.bat scripts (e.g. claude.cmd
+    // from npm global install) are resolved via PATHEXT.
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.args(["/C", program]);
+        c
+    };
+    #[cfg(not(windows))]
     let mut cmd = Command::new(program);
+
     // Apply all shell env vars
     for (key, value) in get_shell_env() {
         cmd.env(key, value);
