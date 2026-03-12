@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { Bug } from "lucide-react";
 import Sidebar from "./components/sidebar/Sidebar";
 import ChatPanel from "./components/chat/ChatPanel";
 import SettingsDialog from "./components/settings/SettingsDialog";
@@ -51,19 +50,6 @@ export default function App() {
 
       {/* Debug panel */}
       <DebugPanel visible={debugOpen} onClose={() => setDebugOpen(false)} />
-
-      {/* Debug toggle button (bottom-right) */}
-      <button
-        onClick={() => setDebugOpen((v) => !v)}
-        className={`fixed bottom-4 right-4 z-40 p-2 rounded-full shadow-lg transition-colors ${
-          debugOpen
-            ? "bg-purple-600 text-white"
-            : "bg-bg-secondary border border-border text-text-muted hover:text-text-primary"
-        }`}
-        title="Toggle Debug Console (⌘⇧D)"
-      >
-        <Bug size={16} />
-      </button>
 
       <SettingsDialog
         open={settingsOpen}

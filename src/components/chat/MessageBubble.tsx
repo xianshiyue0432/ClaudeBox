@@ -93,10 +93,10 @@ interface MessageBubbleProps {
   messageIndex: number;
   /** Whether to show the bot avatar (false for consecutive bot messages) */
   showAvatar?: boolean;
-  /** Whether this is the last assistant message — summary stats only show here */
+  /** Whether this is the last assistant message in its consecutive run (before next user msg or end) */
+  isLastInTurn?: boolean;
+  /** Whether this is the last assistant message overall */
   isLastAssistant?: boolean;
-  /** Whether the whole session is still streaming */
-  sessionStreaming?: boolean;
   /** Total tokens for the current turn */
   totalTokens?: number;
   /** Timestamp when streaming started (for duration calc) */
@@ -112,8 +112,8 @@ export default function MessageBubble({
   allMessages,
   messageIndex,
   showAvatar = true,
+  isLastInTurn = false,
   isLastAssistant = false,
-  sessionStreaming = false,
   totalTokens = 0,
   streamStartTime,
   pendingInteraction,
@@ -144,9 +144,9 @@ export default function MessageBubble({
 
     return (
       <div className="flex justify-end mb-4 px-4">
-        <div className="flex items-start gap-2.5 max-w-[80%]">
-          <div className="rounded-2xl rounded-tr-sm px-4 py-2.5 bg-user-bubble text-text-primary">
-            <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">
+        <div className="flex items-start gap-2.5 max-w-[80%] min-w-0">
+          <div className="rounded-2xl rounded-tr-sm px-4 py-2.5 bg-user-bubble text-text-primary overflow-hidden min-w-0">
+            <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[0.9375rem] leading-relaxed">
               {message.content[0]?.text || ""}
             </p>
           </div>
@@ -176,7 +176,7 @@ export default function MessageBubble({
 
   return (
     <div className={`flex justify-start px-4 ${showAvatar ? "mb-1.5 mt-1" : "mb-0.5"}`}>
-      <div className="flex items-start gap-2.5 max-w-[90%]">
+      <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
         {/* Avatar or spacer */}
         {showAvatar ? (
           <div className="flex-shrink-0 w-7 h-7 rounded-full bg-bg-tertiary flex items-center justify-center mt-0.5">
@@ -240,15 +240,15 @@ export default function MessageBubble({
             </div>
           )}
 
-          {/* Metadata — only on last assistant message after streaming ends */}
-          {isLastAssistant && !sessionStreaming && !message.isStreaming && (
-            <div className="flex items-center gap-3 px-1 text-xs text-text-muted">
+          {/* Metadata — show on last assistant message of each completed turn */}
+          {isLastInTurn && !message.isStreaming && (
+            <div className="flex items-center gap-3 px-1 mt-1 mb-2 text-xs text-text-muted">
               <span>{formatTimeWithSeconds(message.timestamp)}</span>
-              {streamStartTime && (
+              {isLastAssistant && streamStartTime && (
                 <span>{formatDuration(message.timestamp - streamStartTime)}</span>
               )}
               {message.model && <span>{message.model}</span>}
-              {totalTokens > 0 && <span>{totalTokens.toLocaleString()} tokens</span>}
+              {isLastAssistant && totalTokens > 0 && <span>{totalTokens.toLocaleString()} tokens</span>}
             </div>
           )}
         </div>

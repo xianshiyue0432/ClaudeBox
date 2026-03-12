@@ -233,7 +233,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       >
         <FolderOpen size={14} className="text-text-muted pointer-events-none" />
         <span
-          className="text-sm text-text-secondary truncate flex-1 cursor-pointer hover:text-accent transition-colors"
+          className="text-sm text-text-secondary truncate max-w-[50%] cursor-pointer hover:text-accent transition-colors"
           title={currentSession?.projectPath}
           onClick={() => {
             if (currentSession?.projectPath) {
@@ -243,6 +243,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         >
           {currentSession?.projectName}
         </span>
+        {/* Drag spacer — fills remaining space for window dragging */}
+        <div className="flex-1" data-tauri-drag-region />
         {gitBranch && (
           <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-muted pointer-events-none">
             <GitBranch size={11} />
@@ -264,7 +266,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         <div className="flex-1 flex flex-col min-w-0">
           {/* Messages */}
           <div className="flex-1 overflow-y-auto py-4">
-            <div className="max-w-3xl mx-auto">
+            <div className="max-w-3xl mx-auto overflow-hidden">
               {currentMessages.length === 0 && (
                 <div className="text-center py-16 text-text-muted">
                   <Terminal size={24} className="mx-auto mb-2 opacity-50" />
@@ -280,7 +282,11 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                   const prev = currentMessages[i - 1];
                   if (prev.role === "assistant") showAvatar = false;
                 }
-                // Check if this is the last assistant message
+                // Last assistant in its consecutive run (before a user msg or end of list)
+                const isLastInTurn =
+                  msg.role === "assistant" &&
+                  (i + 1 >= currentMessages.length || currentMessages[i + 1].role !== "assistant");
+                // The very last assistant message overall
                 const isLastAssistant =
                   msg.role === "assistant" &&
                   !currentMessages.slice(i + 1).some((m) => m.role === "assistant");
@@ -291,8 +297,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                     allMessages={currentMessages}
                     messageIndex={i}
                     showAvatar={showAvatar}
+                    isLastInTurn={isLastInTurn}
                     isLastAssistant={isLastAssistant}
-                    sessionStreaming={isStreaming}
                     totalTokens={totalTokens}
                     streamStartTime={streamStartTime}
                     pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
