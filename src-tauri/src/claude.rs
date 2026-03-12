@@ -507,3 +507,13 @@ pub fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
     });
     Ok(entries)
 }
+
+#[tauri::command]
+pub fn read_file(path: String) -> Result<String, String> {
+    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    // Limit to 2MB to avoid memory issues
+    if metadata.len() > 2 * 1024 * 1024 {
+        return Err("File too large (>2MB)".to_string());
+    }
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}

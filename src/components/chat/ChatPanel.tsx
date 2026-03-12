@@ -2,10 +2,12 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { sendMessage, stopSession, onStream, getGitBranch, sendResponse } from "../../lib/claude-ipc";
+import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import MessageBubble from "./MessageBubble";
 import InputArea from "./InputArea";
 import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
+import FileViewer from "./FileViewer";
 import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight } from "lucide-react";
 
 interface ChatPanelProps {
@@ -17,7 +19,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     currentSessionId,
     sessions,
     messages,
-    stderrLogs,
     isStreaming,
     streamError,
     streamStartTimes,
@@ -37,6 +38,23 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const [gitBranch, setGitBranch] = useState<string | null>(null);
   const [showFilePanel, setShowFilePanel] = useState(false);
+  const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+
+  const FILE_PANEL_WIDTH = 256; // w-64
+
+  const toggleFilePanel = useCallback(async () => {
+    const next = !showFilePanel;
+    setShowFilePanel(next);
+    if (!next) setOpenFilePath(null);
+    try {
+      const win = getCurrentWindow();
+      const size = await win.outerSize();
+      const delta = next ? FILE_PANEL_WIDTH : -(openFilePath ? 560 : FILE_PANEL_WIDTH);
+      await win.setSize(new PhysicalSize(size.width + delta, size.height));
+    } catch {
+      // ignore — window API may not be available in dev
+    }
+  }, [showFilePanel, openFilePath]);
 
   // Fetch git branch when session changes
   useEffect(() => {
@@ -92,7 +110,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       setStreaming(true);
       clearError();
       try {
-        const pid = await sendMessage({
+        await sendMessage({
           session_id: currentSessionId,
           message: content,
           cwd: currentSession.projectPath,
@@ -105,7 +123,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           api_key: settings.apiKey || undefined,
           base_url: settings.baseUrl || undefined,
         });
-        addSystemMessage(currentSessionId, `Task started, PID: ${pid}`);
       } catch (err) {
         handleStreamDone(currentSessionId, String(err));
       }
@@ -156,9 +173,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
 
   const currentMessages = currentSessionId
     ? messages[currentSessionId] || []
-    : [];
-  const currentStderr = currentSessionId
-    ? stderrLogs[currentSessionId] || []
     : [];
 
   // Compute total tokens for the current turn (all assistant messages after last user message)
@@ -225,7 +239,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           </span>
         )}
         <button
-          onClick={() => setShowFilePanel(!showFilePanel)}
+          onClick={toggleFilePanel}
           className="p-1.5 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
           title={showFilePanel ? "Close file panel" : "Open file panel"}
         >
@@ -285,17 +299,6 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
               </div>
             )}
 
-            {currentStderr.length > 0 && (
-              <details className="max-w-3xl mx-auto px-4 mb-4">
-                <summary className="text-xs text-text-muted cursor-pointer hover:text-text-secondary">
-                  stderr ({currentStderr.length})
-                </summary>
-                <pre className="mt-1 text-xs bg-code-bg rounded p-2 max-h-32 overflow-y-auto text-text-muted">
-                  {currentStderr.slice(-50).join("\n")}
-                </pre>
-              </details>
-            )}
-
             <div ref={messagesEndRef} />
           </div>
 
@@ -309,6 +312,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             isStreaming={isStreaming}
             disabled={!claudeAvailable}
             model={currentSession?.model || ""}
+            models={settings.models}
             permissionMode={currentSession?.permissionMode || ""}
             onModelChange={handleModelChange}
             onPermissionModeChange={handlePermissionModeChange}
@@ -320,8 +324,18 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
 
         {/* File panel */}
         {showFilePanel && currentSession?.projectPath && (
-          <div className="w-64 border-l border-border bg-bg-secondary flex-shrink-0">
-            <FileTree rootPath={currentSession.projectPath} />
+          <div className={`border-l border-border bg-bg-secondary flex-shrink-0 flex ${openFilePath ? "w-[560px]" : "w-64"}`}>
+            <div className="w-64 flex-shrink-0">
+              <FileTree rootPath={currentSession.projectPath} onFileSelect={setOpenFilePath} />
+            </div>
+            {openFilePath && (
+              <div className="flex-1 border-l border-border min-w-0">
+                <FileViewer
+                  filePath={openFilePath}
+                  onClose={() => setOpenFilePath(null)}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

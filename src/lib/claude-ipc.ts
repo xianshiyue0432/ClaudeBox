@@ -80,3 +80,8 @@ export interface DirEntry {
 export async function listDir(path: string): Promise<DirEntry[]> {
   return invoke("list_dir", { path });
 }
+
+/** Read a text file's content */
+export async function readFile(path: string): Promise<string> {
+  return invoke("read_file", { path });
+}

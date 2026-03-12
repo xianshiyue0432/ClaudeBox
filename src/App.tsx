@@ -69,6 +69,7 @@ export default function App() {
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onClaudeStatusChange={setClaudeAvailable}
+        onOpenDebug={() => setDebugOpen(true)}
       />
     </div>
   );

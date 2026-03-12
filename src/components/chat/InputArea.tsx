@@ -7,6 +7,7 @@ interface InputAreaProps {
   isStreaming: boolean;
   disabled?: boolean;
   model?: string;
+  models?: string[];
   permissionMode?: string;
   onModelChange?: (model: string) => void;
   onPermissionModeChange?: (mode: string) => void;
@@ -14,8 +15,6 @@ interface InputAreaProps {
   allowedTools?: string[];
   onAllowedToolsChange?: (tools: string[]) => void;
 }
-
-// Model is now a free-text input — no fixed options
 
 const MODE_OPTIONS = [
   { value: "", label: "Default" },
@@ -184,6 +183,7 @@ export default function InputArea({
   isStreaming,
   disabled,
   model = "",
+  models = [],
   permissionMode = "",
   onModelChange,
   onPermissionModeChange,
@@ -271,15 +271,23 @@ export default function InputArea({
         {onModelChange && onPermissionModeChange && (
           <div className="flex items-center gap-1 mt-1.5 px-1">
             <span className="text-[10px] text-text-muted mr-0.5">Model:</span>
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => onModelChange(e.target.value)}
-              placeholder="e.g. claude-sonnet-4-20250514"
-              className="w-48 px-2 py-0.5 rounded-md text-xs bg-transparent border border-transparent
-                         text-text-secondary hover:border-border focus:border-accent focus:outline-none
-                         placeholder:text-text-muted/50 transition-colors"
-            />
+            {models.length > 0 ? (
+              <DropdownSelect
+                value={model}
+                options={models.map((m) => ({ value: m, label: m }))}
+                onChange={(v) => onModelChange?.(v)}
+              />
+            ) : (
+              <input
+                type="text"
+                value={model}
+                onChange={(e) => onModelChange?.(e.target.value)}
+                placeholder="Add models in Settings"
+                className="w-48 px-2 py-0.5 rounded-md text-xs bg-transparent border border-transparent
+                           text-text-secondary hover:border-border focus:border-accent focus:outline-none
+                           placeholder:text-text-muted/50 transition-colors"
+              />
+            )}
             <span className="text-border mx-1">|</span>
             <span className="text-[10px] text-text-muted mr-0.5">Mode:</span>
             <DropdownSelect

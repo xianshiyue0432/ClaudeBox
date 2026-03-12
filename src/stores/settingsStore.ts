@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 export interface Settings {
   model: string;
+  models: string[];
   permissionMode: string;
   claudePath: string;
   workingDirectory: string;
@@ -20,6 +21,7 @@ const STORAGE_KEY = "claudebox-settings";
 
 const defaultSettings: Settings = {
   model: "",
+  models: [],
   permissionMode: "",
   claudePath: "claude",
   workingDirectory: "",

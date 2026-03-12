@@ -1,23 +1,77 @@
 import { useState, useEffect } from "react";
-import { X, CheckCircle, XCircle, Loader2 } from "lucide-react";
+import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, Copy, Check } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { checkClaudeInstalled } from "../../lib/claude-ipc";
+
+function getInstallInstructions(): { platform: string; command: string; note: string } {
+  const ua = navigator.userAgent.toLowerCase();
+  if (ua.includes("mac") || ua.includes("darwin")) {
+    return {
+      platform: "macOS",
+      command: "brew install claude-code",
+      note: "Requires Homebrew. Alternatively: npm install -g @anthropic-ai/claude-code",
+    };
+  } else if (ua.includes("win")) {
+    return {
+      platform: "Windows",
+      command: "npm install -g @anthropic-ai/claude-code",
+      note: "Requires Node.js 18+.",
+    };
+  } else {
+    return {
+      platform: "Linux",
+      command: "npm install -g @anthropic-ai/claude-code",
+      note: "Requires Node.js 18+. Or use: curl -fsSL https://cli.anthropic.com/install.sh | sh",
+    };
+  }
+}
 
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
   onClaudeStatusChange: (available: boolean) => void;
+  onOpenDebug?: () => void;
+}
+
+function InstallInstructions() {
+  const [copied, setCopied] = useState(false);
+  const info = getInstallInstructions();
+  const handleCopy = () => {
+    navigator.clipboard.writeText(info.command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <div className="mt-2 rounded-lg bg-bg-secondary border border-border p-3">
+      <p className="text-xs text-text-secondary mb-2">
+        Install Claude Code for <span className="font-medium text-text-primary">{info.platform}</span>:
+      </p>
+      <div className="flex items-center gap-2 bg-code-bg rounded-md px-3 py-2">
+        <code className="text-xs text-text-primary flex-1 select-all">{info.command}</code>
+        <button
+          onClick={handleCopy}
+          className="p-1 rounded text-text-muted hover:text-text-primary transition-colors flex-shrink-0"
+          title="Copy command"
+        >
+          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+        </button>
+      </div>
+      <p className="text-[10px] text-text-muted mt-1.5">{info.note}</p>
+    </div>
+  );
 }
 
 export default function SettingsDialog({
   open,
   onClose,
   onClaudeStatusChange,
+  onOpenDebug,
 }: SettingsDialogProps) {
   const { settings, updateSettings } = useSettingsStore();
   const [claudeVersion, setClaudeVersion] = useState<string | null>(null);
   const [claudeError, setClaudeError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [modelInput, setModelInput] = useState("");
 
   const checkClaude = async () => {
     setChecking(true);
@@ -96,6 +150,8 @@ export default function SettingsDialog({
                 Re-check
               </button>
             </div>
+            {/* Install instructions when not found */}
+            {!checking && !claudeVersion && <InstallInstructions />}
           </div>
 
           {/* Claude CLI Path */}
@@ -117,22 +173,84 @@ export default function SettingsDialog({
             </p>
           </div>
 
-          {/* Default Model */}
+          {/* Models */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-1.5">
-              Default Model
+              Models
             </label>
-            <input
-              type="text"
-              value={settings.model}
-              onChange={(e) => updateSettings({ model: e.target.value })}
-              placeholder="e.g. claude-sonnet-4-20250514"
-              className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
-                         text-text-primary placeholder:text-text-muted
-                         focus:outline-none focus:ring-2 focus:ring-accent/50"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={modelInput}
+                onChange={(e) => setModelInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const trimmed = modelInput.trim();
+                    if (trimmed && !settings.models.includes(trimmed)) {
+                      const newModels = [...settings.models, trimmed];
+                      updateSettings({ models: newModels, model: trimmed });
+                      setModelInput("");
+                    }
+                  }
+                }}
+                placeholder="e.g. claude-sonnet-4-20250514"
+                className="flex-1 rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
+                           text-text-primary placeholder:text-text-muted
+                           focus:outline-none focus:ring-2 focus:ring-accent/50"
+              />
+              <button
+                onClick={() => {
+                  const trimmed = modelInput.trim();
+                  if (trimmed && !settings.models.includes(trimmed)) {
+                    const newModels = [...settings.models, trimmed];
+                    updateSettings({ models: newModels, model: trimmed });
+                    setModelInput("");
+                  }
+                }}
+                disabled={!modelInput.trim() || settings.models.includes(modelInput.trim())}
+                className="px-3 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover
+                           transition-colors text-sm disabled:opacity-30 disabled:cursor-not-allowed
+                           flex items-center gap-1"
+              >
+                <Plus size={14} />
+                Add
+              </button>
+            </div>
+            {settings.models.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {settings.models.map((m) => (
+                  <div
+                    key={m}
+                    className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-bg-secondary text-sm group"
+                  >
+                    <span className={`text-text-primary truncate ${m === settings.model ? "font-medium" : ""}`}>
+                      {m}
+                      {m === settings.model && (
+                        <span className="ml-2 text-xs text-accent">(active)</span>
+                      )}
+                    </span>
+                    <button
+                      onClick={() => {
+                        const newModels = settings.models.filter((x) => x !== m);
+                        const updates: { models: string[]; model?: string } = { models: newModels };
+                        if (settings.model === m) {
+                          updates.model = newModels[0] || "";
+                        }
+                        updateSettings(updates);
+                      }}
+                      className="p-1 rounded hover:bg-error/20 text-text-muted hover:text-error
+                                 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Remove model"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <p className="text-xs text-text-muted mt-1">
-              Full model ID (e.g. claude-sonnet-4-20250514). Can be overridden per session.
+              Add model IDs to switch between them in the chat toolbar.
             </p>
           </div>
 
@@ -195,7 +313,21 @@ export default function SettingsDialog({
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-border">
+        <div className="px-6 py-4 border-t border-border space-y-2">
+          {onOpenDebug && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenDebug();
+              }}
+              className="w-full py-2 rounded-lg border border-border text-text-secondary
+                         hover:bg-bg-secondary hover:text-text-primary
+                         transition-colors text-sm font-medium flex items-center justify-center gap-2"
+            >
+              <ScrollText size={14} />
+              View Logs
+            </button>
+          )}
           <button
             onClick={onClose}
             className="w-full py-2 rounded-lg bg-accent text-white hover:bg-accent-hover

@@ -34,13 +34,16 @@ function getFileIcon(name: string): React.ReactNode {
   return EXT_ICONS[ext] || <File size={14} className="text-text-muted" />;
 }
 
-function TreeNode({ entry, depth }: { entry: DirEntry; depth: number }) {
+function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: number; onFileSelect?: (path: string) => void }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   const toggle = useCallback(async () => {
-    if (!entry.is_dir) return;
+    if (!entry.is_dir) {
+      onFileSelect?.(entry.path);
+      return;
+    }
     if (!expanded && children === null) {
       setLoading(true);
       try {
@@ -52,7 +55,7 @@ function TreeNode({ entry, depth }: { entry: DirEntry; depth: number }) {
       setLoading(false);
     }
     setExpanded(!expanded);
-  }, [entry, expanded, children]);
+  }, [entry, expanded, children, onFileSelect]);
 
   return (
     <div>
@@ -92,7 +95,7 @@ function TreeNode({ entry, depth }: { entry: DirEntry; depth: number }) {
             </div>
           )}
           {children?.map((child) => (
-            <TreeNode key={child.path} entry={child} depth={depth + 1} />
+            <TreeNode key={child.path} entry={child} depth={depth + 1} onFileSelect={onFileSelect} />
           ))}
           {children?.length === 0 && !loading && (
             <div
@@ -110,9 +113,10 @@ function TreeNode({ entry, depth }: { entry: DirEntry; depth: number }) {
 
 interface FileTreeProps {
   rootPath: string;
+  onFileSelect?: (path: string) => void;
 }
 
-export default function FileTree({ rootPath }: FileTreeProps) {
+export default function FileTree({ rootPath, onFileSelect }: FileTreeProps) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -153,7 +157,7 @@ export default function FileTree({ rootPath }: FileTreeProps) {
           <div className="px-3 py-4 text-xs text-text-muted">No files</div>
         ) : (
           entries.map((entry) => (
-            <TreeNode key={entry.path} entry={entry} depth={0} />
+            <TreeNode key={entry.path} entry={entry} depth={0} onFileSelect={onFileSelect} />
           ))
         )}
       </div>
