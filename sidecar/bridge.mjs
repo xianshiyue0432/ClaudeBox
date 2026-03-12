@@ -56,7 +56,10 @@ function preflight() {
 /**
  * Create a wrapper script around `claude` that tees stderr to a temp file.
  * Returns { wrapperPath, stderrPath, cleanup }.
- * On Windows, creates a .cmd batch file. On Unix, creates a bash script.
+ * On Windows, creates a .mjs Node script (so the SDK runs it via `node`,
+ * avoiding the EINVAL error that occurs when spawn()-ing .cmd files on
+ * newer Node.js versions due to CVE-2024-27980).
+ * On Unix, creates a bash script.
  */
 function createClaudeWrapper() {
   const isWindows = process.platform === "win32";
@@ -74,9 +77,44 @@ function createClaudeWrapper() {
 
   let wrapperPath;
   if (isWindows) {
-    // Windows: .cmd batch file that redirects stderr to file
-    wrapperPath = join(dir, "claude-wrapper.cmd");
-    writeFileSync(wrapperPath, `@echo off\r\n"${claudePath}" %* 2> "${stderrPath}"\r\n`);
+    // Windows: .mjs Node script wrapper.
+    // The Agent SDK checks the file extension:
+    //   - .cmd/.exe/etc → spawn(path, args) directly → EINVAL on Windows
+    //   - .mjs/.js/etc  → spawn("node", [path, ...args]) → works fine
+    // The wrapper spawns claude with shell:true so .cmd shims work.
+    wrapperPath = join(dir, "claude-wrapper.mjs");
+    const wrapperScript = `
+import { spawn } from "child_process";
+import { createWriteStream } from "fs";
+
+const claudePath = ${JSON.stringify(claudePath)};
+const stderrPath = ${JSON.stringify(stderrPath)};
+const args = process.argv.slice(2);
+const stderrFile = createWriteStream(stderrPath, { flags: "a" });
+
+const child = spawn(claudePath, args, {
+  stdio: ["pipe", "pipe", "pipe"],
+  shell: true,
+  windowsHide: true,
+});
+
+process.stdin.pipe(child.stdin);
+child.stdout.pipe(process.stdout);
+child.stderr.on("data", (chunk) => stderrFile.write(chunk));
+
+child.on("exit", (code, signal) => {
+  stderrFile.end(() => process.exit(code ?? (signal ? 1 : 0)));
+});
+child.on("error", (err) => {
+  stderrFile.write(err.message + "\\n");
+  stderrFile.end(() => process.exit(1));
+});
+
+// Forward termination signals to child
+process.on("SIGTERM", () => child.kill("SIGTERM"));
+process.on("SIGINT", () => child.kill("SIGINT"));
+`;
+    writeFileSync(wrapperPath, wrapperScript.trimStart());
   } else {
     // Unix: bash script with tee to capture stderr while keeping it visible
     wrapperPath = join(dir, "claude-wrapper.sh");
