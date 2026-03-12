@@ -1,0 +1,210 @@
+@import "tailwindcss";
+@import "highlight.js/styles/github-dark-dimmed.css";
+
+@theme {
+  --color-bg-primary: #1a1a2e;
+  --color-bg-secondary: #16213e;
+  --color-bg-tertiary: #0f3460;
+  --color-bg-chat: #1e1e3a;
+  --color-accent: #e94560;
+  --color-accent-hover: #ff6b6b;
+  --color-text-primary: #eee;
+  --color-text-secondary: #aaa;
+  --color-text-muted: #777;
+  --color-border: #2a2a4a;
+  --color-user-bubble: #3a3a6a;
+  --color-assistant-bg: #222244;
+  --color-tool-bg: #1a1a3a;
+  --color-input-bg: #252545;
+  --color-code-bg: #0d1117;
+  --color-code-header: #161b22;
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+}
+
+/* ── Light theme overrides ─────────────────────────────────── */
+.light {
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f7f7f8;
+  --color-bg-tertiary: #e8ecf1;
+  --color-bg-chat: #fafafa;
+  --color-accent: #d93651;
+  --color-accent-hover: #c22d46;
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: #555;
+  --color-text-muted: #999;
+  --color-border: #e0e0e8;
+  --color-user-bubble: #e8e8f4;
+  --color-assistant-bg: #f2f2f8;
+  --color-tool-bg: #f5f5fa;
+  --color-input-bg: #f0f0f5;
+  --color-code-bg: #f6f8fa;
+  --color-code-header: #eaeef2;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+}
+
+.light .markdown-body strong { color: #1a1a2e; }
+.light .markdown-body code:not(pre code) { color: #c7254e; background: rgba(0,0,0,0.06); }
+.light .markdown-body tr:nth-child(even) { background: rgba(0,0,0,0.02); }
+.light .hljs { background: #f6f8fa !important; color: #24292f !important; }
+.light .hljs-keyword, .light .hljs-selector-tag { color: #cf222e; }
+.light .hljs-string, .light .hljs-attr { color: #0a3069; }
+.light .hljs-comment, .light .hljs-quote { color: #6e7781; }
+.light .hljs-function, .light .hljs-title { color: #8250df; }
+.light .hljs-number, .light .hljs-literal { color: #0550ae; }
+.light .hljs-built_in, .light .hljs-type { color: #953800; }
+.light .hljs-variable, .light .hljs-template-variable { color: #953800; }
+.light .hljs-params { color: #24292f; }
+.light .hljs-meta { color: #0550ae; }
+
+:root {
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* ── Markdown ─────────────────────────────────────────────────── */
+
+.markdown-body {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  word-wrap: break-word;
+}
+
+.markdown-body > *:first-child { margin-top: 0; }
+.markdown-body > *:last-child { margin-bottom: 0; }
+
+/* Headings */
+.markdown-body h1 { font-size: 1.5em; font-weight: 700; margin: 1.2em 0 0.6em; border-bottom: 1px solid var(--color-border); padding-bottom: 0.3em; }
+.markdown-body h2 { font-size: 1.3em; font-weight: 700; margin: 1em 0 0.5em; border-bottom: 1px solid var(--color-border); padding-bottom: 0.25em; }
+.markdown-body h3 { font-size: 1.15em; font-weight: 600; margin: 0.8em 0 0.4em; }
+.markdown-body h4 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.3em; }
+
+/* Paragraphs & text */
+.markdown-body p { margin: 0.6em 0; }
+.markdown-body strong { font-weight: 600; color: #fff; }
+.markdown-body em { font-style: italic; }
+.markdown-body hr { border: none; border-top: 1px solid var(--color-border); margin: 1.5em 0; }
+
+/* Lists */
+.markdown-body ul { list-style: disc; margin: 0.5em 0; padding-left: 1.8em; }
+.markdown-body ol { list-style: decimal; margin: 0.5em 0; padding-left: 1.8em; }
+.markdown-body li { margin: 0.25em 0; }
+.markdown-body li > ul, .markdown-body li > ol { margin: 0.15em 0; }
+.markdown-body li::marker { color: var(--color-text-muted); }
+
+/* Task lists */
+.markdown-body li.task-list-item { list-style: none; margin-left: -1.4em; }
+.markdown-body li.task-list-item input[type="checkbox"] {
+  margin-right: 0.4em;
+  accent-color: var(--color-accent);
+}
+
+/* Inline code */
+.markdown-body code:not(pre code) {
+  background: rgba(110, 118, 129, 0.25);
+  padding: 0.2em 0.45em;
+  border-radius: 5px;
+  font-size: 0.88em;
+  font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, 'Courier New', monospace;
+  color: #f0c674;
+}
+
+/* Code blocks - handled by CodeBlock component */
+.markdown-body pre {
+  margin: 0;
+  border-radius: 0;
+  overflow: hidden;
+  border: none;
+  background: none;
+}
+
+.markdown-body pre code {
+  display: block;
+  padding: 0;
+  font-size: 0.875em;
+  line-height: 1.55;
+  font-family: 'SF Mono', 'Fira Code', Menlo, Monaco, 'Courier New', monospace;
+  overflow-x: auto;
+  background: none;
+}
+
+/* Blockquote */
+.markdown-body blockquote {
+  border-left: 3px solid var(--color-accent);
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  color: var(--color-text-secondary);
+  background: rgba(233, 69, 96, 0.04);
+  border-radius: 0 6px 6px 0;
+}
+.markdown-body blockquote p { margin: 0.3em 0; }
+
+/* Tables */
+.markdown-body table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+  font-size: 0.9em;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+}
+.markdown-body th {
+  background: var(--color-bg-tertiary);
+  font-weight: 600;
+  text-align: left;
+  padding: 0.6em 0.9em;
+  border: 1px solid var(--color-border);
+}
+.markdown-body td {
+  padding: 0.5em 0.9em;
+  border: 1px solid var(--color-border);
+}
+.markdown-body tr:nth-child(even) { background: rgba(255, 255, 255, 0.02); }
+
+/* Links */
+.markdown-body a {
+  color: var(--color-accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.markdown-body a:hover { border-bottom-color: var(--color-accent); }
+
+/* Images */
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.5em 0;
+}
+
+/* highlight.js overrides */
+.hljs {
+  background: var(--color-code-bg) !important;
+  padding: 0 !important;
+}
+
+/* Diff: only font color, no background */
+.hljs-addition { color: var(--color-success); background: none !important; }
+.hljs-deletion { color: var(--color-error); background: none !important; }

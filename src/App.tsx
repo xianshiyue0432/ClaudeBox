@@ -1,0 +1,75 @@
+import { useState, useEffect } from "react";
+import { Bug } from "lucide-react";
+import Sidebar from "./components/sidebar/Sidebar";
+import ChatPanel from "./components/chat/ChatPanel";
+import SettingsDialog from "./components/settings/SettingsDialog";
+import DebugPanel from "./components/debug/DebugPanel";
+import { checkClaudeInstalled } from "./lib/claude-ipc";
+import { useSettingsStore } from "./stores/settingsStore";
+
+export default function App() {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [claudeAvailable, setClaudeAvailable] = useState(true);
+  const { settings } = useSettingsStore();
+
+  // Apply theme class to root element
+  useEffect(() => {
+    const root = document.documentElement;
+    if (settings.theme === "light") {
+      root.classList.add("light");
+    } else {
+      root.classList.remove("light");
+    }
+  }, [settings.theme]);
+
+  useEffect(() => {
+    checkClaudeInstalled(settings.claudePath || undefined)
+      .then(() => setClaudeAvailable(true))
+      .catch(() => {
+        setClaudeAvailable(false);
+        setSettingsOpen(true);
+      });
+  }, []);
+
+  // Keyboard shortcut: Ctrl/Cmd+Shift+D to toggle debug
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "d") {
+        e.preventDefault();
+        setDebugOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  return (
+    <div className="flex h-screen bg-bg-primary">
+      <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      <ChatPanel claudeAvailable={claudeAvailable} />
+
+      {/* Debug panel */}
+      <DebugPanel visible={debugOpen} onClose={() => setDebugOpen(false)} />
+
+      {/* Debug toggle button (bottom-right) */}
+      <button
+        onClick={() => setDebugOpen((v) => !v)}
+        className={`fixed bottom-4 right-4 z-40 p-2 rounded-full shadow-lg transition-colors ${
+          debugOpen
+            ? "bg-purple-600 text-white"
+            : "bg-bg-secondary border border-border text-text-muted hover:text-text-primary"
+        }`}
+        title="Toggle Debug Console (⌘⇧D)"
+      >
+        <Bug size={16} />
+      </button>
+
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onClaudeStatusChange={setClaudeAvailable}
+      />
+    </div>
+  );
+}
