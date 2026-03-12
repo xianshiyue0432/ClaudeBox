@@ -1,7 +1,7 @@
 import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChatMessage, ContentBlock } from "../../lib/stream-parser";
+import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 import CodeBlock from "./CodeBlock";
 import ToolCallCard from "./ToolCallCard";
 import { formatTimeWithSeconds, formatDuration } from "../../lib/utils";
@@ -101,6 +101,10 @@ interface MessageBubbleProps {
   totalTokens?: number;
   /** Timestamp when streaming started (for duration calc) */
   streamStartTime?: number;
+  /** Pending interactive request from the sidecar */
+  pendingInteraction?: PendingInteraction | null;
+  /** Callback when user responds to an interactive tool */
+  onRespond?: (response: Record<string, unknown>) => void;
 }
 
 export default function MessageBubble({
@@ -112,6 +116,8 @@ export default function MessageBubble({
   sessionStreaming = false,
   totalTokens = 0,
   streamStartTime,
+  pendingInteraction,
+  onRespond,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
@@ -204,8 +210,17 @@ export default function MessageBubble({
 
             if (block.type === "tool_use") {
               const result = block.id ? findToolResult(block.id) : undefined;
+              // Pass interactive props only to the last tool_use block that matches
+              const isInteractiveTool =
+                block.name === "AskUserQuestion" || block.name === "ExitPlanMode";
               return (
-                <MemoToolCallCard key={key} block={block} result={result} />
+                <MemoToolCallCard
+                  key={key}
+                  block={block}
+                  result={result}
+                  pendingInteraction={isInteractiveTool ? pendingInteraction : undefined}
+                  onRespond={isInteractiveTool ? onRespond : undefined}
+                />
               );
             }
 

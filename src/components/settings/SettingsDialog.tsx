@@ -122,19 +122,17 @@ export default function SettingsDialog({
             <label className="text-sm font-medium text-text-primary block mb-1.5">
               Default Model
             </label>
-            <select
+            <input
+              type="text"
               value={settings.model}
               onChange={(e) => updateSettings({ model: e.target.value })}
+              placeholder="e.g. claude-sonnet-4-20250514"
               className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
-                         text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50"
-            >
-              <option value="">Default (Sonnet)</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="opus">Opus</option>
-              <option value="haiku">Haiku</option>
-            </select>
+                         text-text-primary placeholder:text-text-muted
+                         focus:outline-none focus:ring-2 focus:ring-accent/50"
+            />
             <p className="text-xs text-text-muted mt-1">
-              Can be overridden per session when opening a project.
+              Full model ID (e.g. claude-sonnet-4-20250514). Can be overridden per session.
             </p>
           </div>
 
@@ -155,6 +153,44 @@ export default function SettingsDialog({
               <option value="auto">Auto Accept</option>
               <option value="plan">Plan Mode</option>
             </select>
+          </div>
+
+          {/* API Key */}
+          <div>
+            <label className="text-sm font-medium text-text-primary block mb-1.5">
+              Anthropic API Key
+            </label>
+            <input
+              type="password"
+              value={settings.apiKey}
+              onChange={(e) => updateSettings({ apiKey: e.target.value })}
+              placeholder="sk-ant-..."
+              className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
+                         text-text-primary placeholder:text-text-muted
+                         focus:outline-none focus:ring-2 focus:ring-accent/50"
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Optional. Leave empty to use Claude CLI&apos;s built-in auth or shell env ANTHROPIC_API_KEY.
+            </p>
+          </div>
+
+          {/* Base URL */}
+          <div>
+            <label className="text-sm font-medium text-text-primary block mb-1.5">
+              API Base URL
+            </label>
+            <input
+              type="text"
+              value={settings.baseUrl}
+              onChange={(e) => updateSettings({ baseUrl: e.target.value })}
+              placeholder="https://api.anthropic.com"
+              className="w-full rounded-lg bg-input-bg border border-border px-3 py-2 text-sm
+                         text-text-primary placeholder:text-text-muted
+                         focus:outline-none focus:ring-2 focus:ring-accent/50"
+            />
+            <p className="text-xs text-text-muted mt-1">
+              Optional. Override the Anthropic API endpoint (for proxies).
+            </p>
           </div>
         </div>
 

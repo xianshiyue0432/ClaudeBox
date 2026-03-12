@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   ContentBlock,
   StreamMessage,
+  PendingInteraction,
 } from "../lib/stream-parser";
 import { useTaskStore } from "./taskStore";
 import { v4Style } from "../lib/utils";
@@ -28,6 +29,8 @@ interface ChatState {
   streamStartTimes: Record<string, number>;
   isStreaming: boolean;
   streamError: string | null;
+  /** Pending interactive tool request (AskUserQuestion / ExitPlanMode) */
+  pendingInteraction: PendingInteraction | null;
 
   createSession: (projectPath: string, model: string, permissionMode: string) => string;
   removeSession: (id: string) => void;
@@ -40,6 +43,8 @@ interface ChatState {
   setStreaming: (streaming: boolean) => void;
   clearError: () => void;
   loadSessions: () => void;
+  /** Clear the pending interaction after it has been responded to */
+  clearPendingInteraction: () => void;
 }
 
 const SESSIONS_KEY = "claudebox-sessions";
@@ -164,6 +169,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamStartTimes: {},
   isStreaming: false,
   streamError: null,
+  pendingInteraction: null,
 
   createSession: (projectPath, model, permissionMode) => {
     // If a session with this path already exists, switch to it
@@ -359,7 +365,33 @@ export const useChatStore = create<ChatState>((set, get) => ({
         if (lastAssistant && event.total_cost_usd !== undefined) {
           // Store cost info if needed in the future
         }
-        set({ isStreaming: false });
+        set({ isStreaming: false, pendingInteraction: null });
+      } else if (event.type === "ask_user" && event.requestId) {
+        // Interactive: Claude is asking the user a question
+        set({
+          pendingInteraction: {
+            type: "ask_user",
+            requestId: event.requestId,
+            questions: event.questions,
+          },
+        });
+      } else if (event.type === "exit_plan" && event.requestId) {
+        // Interactive: Claude wants to exit plan mode — user must approve
+        set({
+          pendingInteraction: {
+            type: "exit_plan",
+            requestId: event.requestId,
+            input: event.input,
+          },
+        });
+      } else if (event.type === "error") {
+        // Sidecar error — parse the raw data for the message field
+        try {
+          const raw = JSON.parse(data);
+          set({ streamError: raw.message || "Unknown sidecar error" });
+        } catch {
+          set({ streamError: "Unknown sidecar error" });
+        }
       }
 
       set({ messages: { ...get().messages, [sessionId]: msgs } });
@@ -392,4 +424,5 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   clearError: () => set({ streamError: null }),
   loadSessions: () => set({ sessions: loadSessions() }),
+  clearPendingInteraction: () => set({ pendingInteraction: null }),
 }));

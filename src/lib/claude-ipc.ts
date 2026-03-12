@@ -10,6 +10,8 @@ export interface SendMessageRequest {
   permission_mode?: string;
   claude_path?: string;
   allowed_tools?: string[];
+  api_key?: string;
+  base_url?: string;
 }
 
 /** Send a message (spawns claude -p per message, with --resume for multi-turn). Returns PID. */
@@ -20,6 +22,17 @@ export async function sendMessage(request: SendMessageRequest): Promise<number> 
 /** Stop a running claude process */
 export async function stopSession(sessionId: string): Promise<void> {
   return invoke("stop_session", { sessionId });
+}
+
+/** Send a response to the sidecar (user answer for AskUserQuestion, plan approval, etc.) */
+export async function sendResponse(
+  sessionId: string,
+  response: Record<string, unknown>
+): Promise<void> {
+  return invoke("send_response", {
+    sessionId,
+    response: JSON.stringify(response),
+  });
 }
 
 /** Check if Claude CLI is installed */

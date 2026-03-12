@@ -1,42 +1,96 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, Write as IoWrite};
+use std::process::{ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, State};
 
-// ── PATH resolution ──────────────────────────────────────────────────
+// ── Shell environment resolution ─────────────────────────────────────
+// macOS .app bundles don't inherit shell env vars (ANTHROPIC_API_KEY, etc.)
+// We capture the full login shell environment once and apply it to child processes.
 
-fn get_shell_path() -> &'static str {
-    static CACHED_PATH: OnceLock<String> = OnceLock::new();
-    CACHED_PATH.get_or_init(|| {
+fn get_shell_env() -> &'static HashMap<String, String> {
+    static CACHED_ENV: OnceLock<HashMap<String, String>> = OnceLock::new();
+    CACHED_ENV.get_or_init(|| {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        // Run login shell to dump the full environment
         if let Ok(output) = Command::new(&shell)
-            .args(["-ilc", "echo $PATH"])
+            .args(["-ilc", "env"])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .output()
         {
             if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return path;
+                let mut env_map = HashMap::new();
+                let text = String::from_utf8_lossy(&output.stdout);
+                for line in text.lines() {
+                    if let Some((key, value)) = line.split_once('=') {
+                        // Skip problematic keys
+                        if key.is_empty() || key.starts_with('_') || key == "PWD"
+                            || key == "OLDPWD" || key == "SHLVL"
+                            || key == "CLAUDECODE" {
+                            continue;
+                        }
+                        env_map.insert(key.to_string(), value.to_string());
+                    }
+                }
+                if !env_map.is_empty() {
+                    return env_map;
                 }
             }
         }
+        // Fallback: at least set a good PATH
         let home = std::env::var("HOME").unwrap_or_else(|_| "/Users/user".to_string());
-        format!(
+        let mut fallback = HashMap::new();
+        fallback.insert("PATH".to_string(), format!(
             "/opt/homebrew/bin:/usr/local/bin:{}/.nvm/versions/node/default/bin:{}/.cargo/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             home, home
-        )
+        ));
+        fallback.insert("HOME".to_string(), home);
+        fallback
     })
 }
 
 fn command_with_path(program: &str) -> Command {
     let mut cmd = Command::new(program);
-    cmd.env("PATH", get_shell_path());
+    // Apply all shell env vars
+    for (key, value) in get_shell_env() {
+        cmd.env(key, value);
+    }
     cmd.env_remove("CLAUDECODE");
     cmd
+}
+
+/// Resolve the sidecar/bridge.mjs path.
+/// In dev mode, it lives at `{project_root}/sidecar/bridge.mjs`.
+/// In production, it's bundled (bridge.bundle.mjs) as a Tauri resource next to the binary.
+fn resolve_bridge_path() -> Result<String, String> {
+    // 1. Development: unbundled file relative to CWD (tauri dev runs from project root)
+    let dev_path = std::env::current_dir()
+        .map(|p| p.join("sidecar/bridge.mjs"))
+        .unwrap_or_default();
+    if dev_path.exists() {
+        return Ok(dev_path.to_string_lossy().to_string());
+    }
+
+    // 2. Production: bundled file relative to the executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            // macOS: Binary is in ClaudeBox.app/Contents/MacOS/
+            // Tauri puts "../sidecar/bridge.bundle.mjs" at Resources/_up_/sidecar/bridge.bundle.mjs
+            let mac_path = parent.join("../Resources/_up_/sidecar/bridge.bundle.mjs");
+            if mac_path.exists() {
+                return Ok(mac_path.canonicalize().unwrap_or(mac_path).to_string_lossy().to_string());
+            }
+            // Linux / Windows: same directory as binary
+            let same_dir = parent.join("bridge.bundle.mjs");
+            if same_dir.exists() {
+                return Ok(same_dir.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    Err("Cannot find sidecar/bridge.mjs — ensure it exists in the project root or is bundled as a resource".to_string())
 }
 
 // ── Debug event helper ───────────────────────────────────────────────
@@ -72,6 +126,8 @@ pub struct ProcessManager {
     claude_sessions: Arc<Mutex<HashMap<String, String>>>,
     /// frontend session id -> child PID (for stopping)
     running_pids: Arc<Mutex<HashMap<String, u32>>>,
+    /// frontend session id -> child stdin handle (for sending responses)
+    stdin_handles: Arc<Mutex<HashMap<String, ChildStdin>>>,
 }
 
 impl ProcessManager {
@@ -79,6 +135,7 @@ impl ProcessManager {
         Self {
             claude_sessions: Arc::new(Mutex::new(HashMap::new())),
             running_pids: Arc::new(Mutex::new(HashMap::new())),
+            stdin_handles: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -99,8 +156,12 @@ pub struct SendMessageRequest {
     pub cwd: String,
     pub model: Option<String>,
     pub permission_mode: Option<String>,
+    /// Kept for check_claude_installed but not used in sidecar mode
+    #[allow(dead_code)]
     pub claude_path: Option<String>,
     pub allowed_tools: Option<Vec<String>>,
+    pub api_key: Option<String>,
+    pub base_url: Option<String>,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -123,7 +184,8 @@ pub fn check_claude_installed(claude_path: Option<String>) -> Result<String, Str
     }
 }
 
-/// Send a message using `claude -p "msg" --output-format stream-json --verbose`.
+/// Send a message by spawning `node sidecar/bridge.mjs` with stdin piped.
+/// The sidecar bridges the Agent SDK `query()` API and streams NDJSON back.
 /// Uses --resume for multi-turn conversations.
 #[tauri::command]
 pub async fn send_message(
@@ -131,68 +193,68 @@ pub async fn send_message(
     state: State<'_, ProcessManager>,
     request: SendMessageRequest,
 ) -> Result<u32, String> {
-    let claude_cmd = request.claude_path.unwrap_or_else(|| "claude".to_string());
     let session_id = request.session_id.clone();
 
-    let mut args: Vec<String> = vec![
-        "-p".to_string(),
-        request.message.clone(),
-        "--output-format".to_string(),
-        "stream-json".to_string(),
-        "--verbose".to_string(),
-    ];
+    let bridge_path = resolve_bridge_path()?;
+    emit_debug(&app, &session_id, "process", &format!("Sidecar: {}", bridge_path));
 
-    // Multi-turn: use --resume with real claude session id
-    {
+    // Build the "start" message for the sidecar
+    let resume_id = {
         let sessions = state.claude_sessions.lock().map_err(|e| e.to_string())?;
-        if let Some(real_id) = sessions.get(&session_id) {
-            args.push("--resume".to_string());
-            args.push(real_id.clone());
-            emit_debug(&app, &session_id, "info", &format!("--resume {}", real_id));
+        sessions.get(&session_id).cloned()
+    };
+
+    if let Some(ref rid) = resume_id {
+        emit_debug(&app, &session_id, "info", &format!("--resume {}", rid));
+    } else {
+        emit_debug(&app, &session_id, "info", "First message (no --resume)");
+    }
+
+    let start_msg = serde_json::json!({
+        "type": "start",
+        "prompt": request.message,
+        "cwd": request.cwd,
+        "model": request.model.as_deref().unwrap_or(""),
+        "resume": resume_id.as_deref().unwrap_or(""),
+        "allowedTools": request.allowed_tools.as_deref().unwrap_or(&[]),
+        "permissionMode": request.permission_mode.as_deref().unwrap_or(""),
+    });
+
+    emit_debug(&app, &session_id, "process", &format!("$ node {} (start: prompt=\"{}\")",
+        bridge_path,
+        if request.message.chars().count() > 60 {
+            format!("{}...", request.message.chars().take(60).collect::<String>())
         } else {
-            emit_debug(&app, &session_id, "info", "First message (no --resume)");
+            request.message.clone()
         }
-    }
-
-    if let Some(ref model) = request.model {
-        if !model.is_empty() {
-            args.push("--model".to_string());
-            args.push(model.clone());
-        }
-    }
-
-    if let Some(ref mode) = request.permission_mode {
-        if !mode.is_empty() {
-            args.push("--permission-mode".to_string());
-            args.push(mode.clone());
-        }
-    }
-
-    if let Some(ref tools) = request.allowed_tools {
-        if !tools.is_empty() {
-            for tool in tools {
-                args.push("--allowedTools".to_string());
-                args.push(tool.clone());
-            }
-        }
-    }
-
-    let full_cmd = format!("{} {}", claude_cmd, args.iter().enumerate().map(|(i, a)| {
-        if i == 1 { format!("\"{}\"", if a.len() > 60 { format!("{}...", &a[..60]) } else { a.clone() }) }
-        else { a.clone() }
-    }).collect::<Vec<_>>().join(" "));
-    emit_debug(&app, &session_id, "process", &format!("$ {}", full_cmd));
+    ));
     emit_debug(&app, &session_id, "info", &format!("cwd: {}", request.cwd));
 
-    let mut child = command_with_path(&claude_cmd)
-        .args(&args)
+    let mut child = command_with_path("node")
+        .arg(&bridge_path)
         .current_dir(&request.cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
+        // Override API key / base URL from settings if provided
+        .envs(
+            request.api_key.as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|k| ("ANTHROPIC_API_KEY".to_string(), k.to_string()))
+                .into_iter()
+                .chain(
+                    request.base_url.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|u| ("ANTHROPIC_BASE_URL".to_string(), u.to_string()))
+                        .into_iter()
+                )
+        )
+        // Ensure CLAUDECODE is never passed to child — prevents
+        // "Cannot be launched inside another Claude Code session" error
+        .env_remove("CLAUDECODE")
         .spawn()
         .map_err(|e| {
-            let msg = format!("Failed to spawn: {}", e);
+            let msg = format!("Failed to spawn node sidecar: {}", e);
             emit_debug(&app, &session_id, "error", &msg);
             msg
         })?;
@@ -200,10 +262,25 @@ pub async fn send_message(
     let pid = child.id();
     emit_debug(&app, &session_id, "process", &format!("Started PID {}", pid));
 
-    // Track PID
+    // Write the start message to stdin
+    let mut stdin = child.stdin.take().ok_or("No stdin")?;
+    let start_line = format!("{}\n", start_msg);
+    stdin.write_all(start_line.as_bytes()).map_err(|e| {
+        let msg = format!("Failed to write start message: {}", e);
+        emit_debug(&app, &session_id, "error", &msg);
+        msg
+    })?;
+    stdin.flush().map_err(|e| e.to_string())?;
+    emit_debug(&app, &session_id, "stdin", &start_line.trim().to_string());
+
+    // Store stdin handle and PID
     {
         let mut pids = state.running_pids.lock().map_err(|e| e.to_string())?;
         pids.insert(session_id.clone(), pid);
+    }
+    {
+        let mut handles = state.stdin_handles.lock().map_err(|e| e.to_string())?;
+        handles.insert(session_id.clone(), stdin);
     }
 
     let stdout = child.stdout.take().ok_or("No stdout")?;
@@ -212,6 +289,7 @@ pub async fn send_message(
     // Clone Arcs for background threads
     let sessions_arc = Arc::clone(&state.claude_sessions);
     let pids_arc = Arc::clone(&state.running_pids);
+    let stdin_arc = Arc::clone(&state.stdin_handles);
 
     // stdout reader thread
     let app_out = app.clone();
@@ -266,9 +344,12 @@ pub async fn send_message(
             stream: "stdout".to_string(),
         });
 
-        // Clean up PID
+        // Clean up PID and stdin handle
         if let Ok(mut pids) = pids_arc.lock() {
             pids.remove(&sid_out);
+        }
+        if let Ok(mut handles) = stdin_arc.lock() {
+            handles.remove(&sid_out);
         }
     });
 
@@ -300,6 +381,29 @@ pub async fn send_message(
     Ok(pid)
 }
 
+/// Send a response to the sidecar (e.g. user answer for AskUserQuestion, plan approval).
+/// Writes a JSON line to the child process's stdin.
+#[tauri::command]
+pub fn send_response(
+    app: AppHandle,
+    state: State<'_, ProcessManager>,
+    session_id: String,
+    response: String,
+) -> Result<(), String> {
+    let mut handles = state.stdin_handles.lock().map_err(|e| e.to_string())?;
+    if let Some(stdin) = handles.get_mut(&session_id) {
+        let line = format!("{}\n", response.trim());
+        emit_debug(&app, &session_id, "stdin", &line.trim().to_string());
+        stdin.write_all(line.as_bytes()).map_err(|e| {
+            format!("Failed to write response: {}", e)
+        })?;
+        stdin.flush().map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        Err(format!("No active session for {}", session_id))
+    }
+}
+
 /// Stop a running claude process
 #[tauri::command]
 pub fn stop_session(
@@ -307,6 +411,16 @@ pub fn stop_session(
     state: State<'_, ProcessManager>,
     session_id: String,
 ) -> Result<(), String> {
+    // Send abort message through stdin first for clean shutdown
+    {
+        let mut handles = state.stdin_handles.lock().map_err(|e| e.to_string())?;
+        if let Some(stdin) = handles.get_mut(&session_id) {
+            let abort_msg = "{\"type\":\"abort\"}\n";
+            let _ = stdin.write_all(abort_msg.as_bytes());
+            let _ = stdin.flush();
+        }
+        handles.remove(&session_id);
+    }
     let mut pids = state.running_pids.lock().map_err(|e| e.to_string())?;
     if let Some(pid) = pids.remove(&session_id) {
         emit_debug(&app, &session_id, "process", &format!("Killing PID {}", pid));

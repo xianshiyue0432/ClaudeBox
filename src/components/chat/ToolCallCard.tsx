@@ -16,8 +16,10 @@ import {
   Bot,
   ListTodo,
   ExternalLink,
+  MessageCircleQuestion,
+  ClipboardCheck,
 } from "lucide-react";
-import type { ContentBlock } from "../../lib/stream-parser";
+import type { ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 import { openInBrowser } from "../../lib/claude-ipc";
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
@@ -34,6 +36,8 @@ const TOOL_ICONS: Record<string, React.ReactNode> = {
   TaskCreate: <ListTodo size={14} />,
   TaskUpdate: <ListTodo size={14} />,
   TodoWrite: <ListTodo size={14} />,
+  AskUserQuestion: <MessageCircleQuestion size={14} />,
+  ExitPlanMode: <ClipboardCheck size={14} />,
 };
 
 /** Extract a short filename from a full path */
@@ -61,21 +65,39 @@ function detectLocalUrl(text: string): string | null {
 interface ToolCallCardProps {
   block: ContentBlock;
   result?: ContentBlock;
+  /** Pending interactive request matching this tool call (if any) */
+  pendingInteraction?: PendingInteraction | null;
+  /** Callback when the user responds to an interactive tool */
+  onRespond?: (response: Record<string, unknown>) => void;
 }
 
-export default function ToolCallCard({ block, result }: ToolCallCardProps) {
+export default function ToolCallCard({ block, result, pendingInteraction, onRespond }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
+  const [answered, setAnswered] = useState(false);
   const toolName = block.name || "Tool";
   const icon = TOOL_ICONS[toolName] || <Terminal size={14} />;
   const input = block.input || {};
   const isError = result?.is_error;
   const isDone = !!result;
 
+  // Check if this tool call is the one with a pending interaction
+  const isAskUser = toolName === "AskUserQuestion" && pendingInteraction?.type === "ask_user" && !answered;
+  const isExitPlan = toolName === "ExitPlanMode" && pendingInteraction?.type === "exit_plan" && !answered;
+
   // Build summary and detail based on tool type
   let summary = toolName;
   let detail = "";
 
-  if (toolName === "Write" || toolName === "NotebookEdit") {
+  if (toolName === "AskUserQuestion") {
+    const questions = pendingInteraction?.questions || (input.questions as unknown[]);
+    const firstQ = questions?.[0] as { question?: string } | undefined;
+    summary = firstQ?.question
+      ? `Question: ${firstQ.question.length > 60 ? firstQ.question.slice(0, 60) + "..." : firstQ.question}`
+      : "Asking a question...";
+  } else if (toolName === "ExitPlanMode") {
+    summary = "Ready to implement — approve plan?";
+  } else if (toolName === "Write" || toolName === "NotebookEdit") {
     const fp = (input.file_path || input.notebook_path || "") as string;
     const content = (input.content || input.new_source || "") as string;
     const lines = lineCount(content);
@@ -127,6 +149,231 @@ export default function ToolCallCard({ block, result }: ToolCallCardProps) {
   // Detect local URL with port in Bash results
   const detectedUrl =
     toolName === "Bash" && resultText ? detectLocalUrl(resultText) : null;
+
+  // ── Handlers for interactive tools ──────────────────────────────
+
+  /** Accumulated answers for multi-question AskUserQuestion */
+  const [answers, setAnswers] = useState<Record<string, string>>({});
+
+  const handleSelectAnswer = (questionText: string, answer: string) => {
+    setAnswers((prev) => ({ ...prev, [questionText]: answer }));
+  };
+
+  const handleSubmitAnswers = () => {
+    if (!onRespond || !pendingInteraction) return;
+    setAnswered(true);
+    onRespond({
+      type: "response",
+      requestId: pendingInteraction.requestId,
+      behavior: "allow",
+      answers,
+    });
+  };
+
+  /** For single-question: answer immediately on click */
+  const handleQuickAnswer = (questionText: string, answer: string) => {
+    if (!onRespond || !pendingInteraction) return;
+    setAnswered(true);
+    onRespond({
+      type: "response",
+      requestId: pendingInteraction.requestId,
+      behavior: "allow",
+      answers: { [questionText]: answer },
+    });
+  };
+
+  const handleExitPlanApprove = () => {
+    if (!onRespond || !pendingInteraction) return;
+    setAnswered(true);
+    onRespond({
+      type: "response",
+      requestId: pendingInteraction.requestId,
+      behavior: "allow",
+    });
+  };
+
+  const handleExitPlanReject = (reason?: string) => {
+    if (!onRespond || !pendingInteraction) return;
+    setAnswered(true);
+    onRespond({
+      type: "response",
+      requestId: pendingInteraction.requestId,
+      behavior: "deny",
+      message: reason || "Plan rejected by user",
+    });
+  };
+
+  // ── Render: AskUserQuestion interactive UI ──────────────────────
+
+  if (isAskUser && pendingInteraction?.questions) {
+    const questions = pendingInteraction.questions;
+    const isSingleQuestion = questions.length === 1;
+
+    return (
+      <div className="rounded-lg border-2 border-accent/50 bg-accent/5 overflow-hidden">
+        <div className="px-3 py-2 flex items-center gap-2 bg-accent/10">
+          <MessageCircleQuestion size={14} className="text-accent" />
+          <span className="text-sm font-medium text-text-primary">Claude needs your input</span>
+        </div>
+        <div className="px-3 py-3 space-y-4">
+          {questions.map((q, qi) => (
+            <div key={qi}>
+              <p className="text-sm text-text-primary mb-2">{q.question}</p>
+              {q.header && (
+                <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-bg-tertiary text-text-muted mb-2">
+                  {q.header}
+                </span>
+              )}
+              <div className="flex flex-wrap gap-2 mb-2">
+                {q.options.map((opt, oi) => {
+                  const isSelected = answers[q.question] === opt.label;
+                  return (
+                    <button
+                      key={oi}
+                      onClick={() =>
+                        isSingleQuestion
+                          ? handleQuickAnswer(q.question, opt.label)
+                          : handleSelectAnswer(q.question, opt.label)
+                      }
+                      className={`px-3 py-1.5 text-sm rounded-lg border text-text-primary
+                                 transition-colors text-left ${
+                                   isSelected
+                                     ? "border-accent bg-accent/15"
+                                     : "border-border bg-bg-secondary hover:bg-accent/10 hover:border-accent/50"
+                                 }`}
+                      title={opt.description}
+                    >
+                      <span className="font-medium">{opt.label}</span>
+                      {opt.description && (
+                        <span className="block text-[11px] text-text-muted mt-0.5">
+                          {opt.description}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {/* Custom "Other" input */}
+              <div className="flex items-center gap-2 mt-2">
+                <input
+                  type="text"
+                  placeholder="Other..."
+                  value={customInputs[q.question] || ""}
+                  onChange={(e) =>
+                    setCustomInputs({ ...customInputs, [q.question]: e.target.value })
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && customInputs[q.question]?.trim()) {
+                      if (isSingleQuestion) {
+                        handleQuickAnswer(q.question, customInputs[q.question].trim());
+                      } else {
+                        handleSelectAnswer(q.question, customInputs[q.question].trim());
+                      }
+                    }
+                  }}
+                  className="flex-1 px-2.5 py-1.5 text-sm rounded-lg border border-border
+                             bg-bg-primary text-text-primary placeholder:text-text-muted
+                             focus:outline-none focus:border-accent/50"
+                />
+                {isSingleQuestion && (
+                  <button
+                    onClick={() => {
+                      if (customInputs[q.question]?.trim()) {
+                        handleQuickAnswer(q.question, customInputs[q.question].trim());
+                      }
+                    }}
+                    disabled={!customInputs[q.question]?.trim()}
+                    className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white
+                               hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed
+                               transition-colors"
+                  >
+                    Send
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+          {/* Submit All button for multi-question */}
+          {!isSingleQuestion && (
+            <button
+              onClick={handleSubmitAnswers}
+              disabled={Object.keys(answers).length < questions.length}
+              className="px-4 py-1.5 text-sm rounded-lg bg-accent text-white font-medium
+                         hover:bg-accent/80 disabled:opacity-40 disabled:cursor-not-allowed
+                         transition-colors"
+            >
+              Submit Answers ({Object.keys(answers).length}/{questions.length})
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: ExitPlanMode approval UI ────────────────────────────
+
+  if (isExitPlan) {
+    const allowedPrompts = (pendingInteraction?.input?.allowedPrompts || []) as {
+      tool: string;
+      prompt: string;
+    }[];
+    return (
+      <div className="rounded-lg border-2 border-accent/50 bg-accent/5 overflow-hidden">
+        <div className="px-3 py-2 flex items-center gap-2 bg-accent/10">
+          <ClipboardCheck size={14} className="text-accent" />
+          <span className="text-sm font-medium text-text-primary">Plan ready — approve to proceed</span>
+        </div>
+        <div className="px-3 py-3">
+          {allowedPrompts.length > 0 && (
+            <div className="mb-3">
+              <div className="text-xs text-text-muted mb-1">Requested permissions:</div>
+              <ul className="text-xs text-text-secondary space-y-0.5">
+                {allowedPrompts.map((p, i) => (
+                  <li key={i} className="flex items-center gap-1.5">
+                    <Terminal size={10} className="text-text-muted flex-shrink-0" />
+                    <span>{p.prompt}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExitPlanApprove}
+              className="px-4 py-1.5 text-sm rounded-lg bg-success/90 text-white
+                         hover:bg-success transition-colors font-medium"
+            >
+              Approve
+            </button>
+            <button
+              onClick={() => handleExitPlanReject()}
+              className="px-4 py-1.5 text-sm rounded-lg bg-bg-secondary border border-border
+                         text-text-secondary hover:bg-error/10 hover:text-error hover:border-error/30
+                         transition-colors"
+            >
+              Reject
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Answered state for interactive tools ─────────────────
+
+  if (answered && (toolName === "AskUserQuestion" || toolName === "ExitPlanMode")) {
+    return (
+      <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-sm">
+          <span className="text-accent flex-shrink-0">{icon}</span>
+          <span className="text-text-secondary text-xs flex-1">{summary}</span>
+          <CheckCircle size={13} className="text-success" />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Render: Standard tool call card (unchanged) ─────────────────
 
   return (
     <div className="rounded-lg border border-border bg-tool-bg overflow-hidden">

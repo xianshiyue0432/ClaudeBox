@@ -20,6 +20,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             claude::send_message,
+            claude::send_response,
             claude::stop_session,
             claude::check_claude_installed,
             claude::get_git_branch,

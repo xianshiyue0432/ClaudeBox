@@ -6,6 +6,8 @@ export interface Settings {
   claudePath: string;
   workingDirectory: string;
   theme: "dark" | "light";
+  apiKey: string;
+  baseUrl: string;
 }
 
 interface SettingsState {
@@ -22,6 +24,8 @@ const defaultSettings: Settings = {
   claudePath: "claude",
   workingDirectory: "",
   theme: "dark",
+  apiKey: "",
+  baseUrl: "",
 };
 
 function loadFromStorage(): Settings {

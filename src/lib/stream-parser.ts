@@ -16,7 +16,7 @@ export interface ContentBlock {
 }
 
 export interface StreamMessage {
-  type: "assistant" | "user" | "system" | "result";
+  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "error";
   subtype?: string;
   session_id?: string;
   message?: {
@@ -48,6 +48,11 @@ export interface StreamMessage {
     filePath?: string;
     content?: string;
   };
+  // For ask_user type (interactive question from Claude)
+  requestId?: string;
+  questions?: AskUserQuestion[];
+  // For exit_plan type
+  input?: Record<string, unknown>;
 }
 
 export interface StreamPayload {
@@ -88,4 +93,28 @@ export interface ToolCall {
   input: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+}
+
+// ── Interactive event types (from sidecar) ──────────────────────────
+
+export interface AskUserQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface AskUserQuestion {
+  question: string;
+  header: string;
+  options: AskUserQuestionOption[];
+  multiSelect: boolean;
+}
+
+export interface PendingInteraction {
+  type: "ask_user" | "exit_plan";
+  requestId: string;
+  /** For ask_user: the questions array */
+  questions?: AskUserQuestion[];
+  /** For exit_plan: the tool input (allowedPrompts, etc.) */
+  input?: Record<string, unknown>;
 }

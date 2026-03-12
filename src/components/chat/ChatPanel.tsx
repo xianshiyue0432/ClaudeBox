@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { sendMessage, stopSession, onStream, getGitBranch } from "../../lib/claude-ipc";
+import { sendMessage, stopSession, onStream, getGitBranch, sendResponse } from "../../lib/claude-ipc";
 import MessageBubble from "./MessageBubble";
 import InputArea from "./InputArea";
 import TaskBoard from "./TaskBoard";
@@ -21,6 +21,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     isStreaming,
     streamError,
     streamStartTimes,
+    pendingInteraction,
     addUserMessage,
     addSystemMessage,
     handleStreamData,
@@ -28,6 +29,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     setStreaming,
     clearError,
     updateSession,
+    clearPendingInteraction,
   } = useChatStore();
 
   const { settings } = useSettingsStore();
@@ -66,6 +68,26 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const handleSend = useCallback(
     async (content: string) => {
       if (!currentSessionId || !currentSession) return;
+
+      // Validate config before sending
+      const effectiveModel = currentSession.model || settings.model;
+      if (!settings.apiKey) {
+        const missing = ["API Key"];
+        if (!effectiveModel) missing.push("Model");
+        addSystemMessage(
+          currentSessionId,
+          `⚠️ Missing configuration: ${missing.join(", ")}. Please configure in Settings (API Key is required for Agent SDK mode).`
+        );
+        return;
+      }
+      if (!effectiveModel) {
+        addSystemMessage(
+          currentSessionId,
+          `⚠️ No model configured. Please set a model (e.g. claude-sonnet-4-20250514) in Settings or session toolbar.`
+        );
+        return;
+      }
+
       addUserMessage(currentSessionId, content);
       setStreaming(true);
       clearError();
@@ -80,13 +102,15 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           allowed_tools: currentSession.allowedTools?.length
             ? currentSession.allowedTools
             : undefined,
+          api_key: settings.apiKey || undefined,
+          base_url: settings.baseUrl || undefined,
         });
         addSystemMessage(currentSessionId, `Task started, PID: ${pid}`);
       } catch (err) {
         handleStreamDone(currentSessionId, String(err));
       }
     },
-    [currentSessionId, currentSession, settings.claudePath, addUserMessage, addSystemMessage, setStreaming, clearError, handleStreamDone]
+    [currentSessionId, currentSession, settings, addUserMessage, addSystemMessage, setStreaming, clearError, handleStreamDone]
   );
 
   const handleStop = useCallback(async () => {
@@ -114,6 +138,20 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       if (currentSessionId) updateSession(currentSessionId, { allowedTools });
     },
     [currentSessionId, updateSession]
+  );
+
+  /** Send a response to the sidecar when user answers an interactive tool (AskUserQuestion / ExitPlanMode) */
+  const handleRespond = useCallback(
+    async (response: Record<string, unknown>) => {
+      if (!currentSessionId) return;
+      try {
+        await sendResponse(currentSessionId, response);
+        clearPendingInteraction();
+      } catch (err) {
+        console.error("Failed to send response:", err);
+      }
+    },
+    [currentSessionId, clearPendingInteraction]
   );
 
   const currentMessages = currentSessionId
@@ -232,6 +270,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                     sessionStreaming={isStreaming}
                     totalTokens={totalTokens}
                     streamStartTime={streamStartTime}
+                    pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
+                    onRespond={isLastAssistant ? handleRespond : undefined}
                   />
                 );
               })}
