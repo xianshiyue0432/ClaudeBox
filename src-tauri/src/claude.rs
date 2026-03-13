@@ -267,6 +267,8 @@ pub struct SendMessageRequest {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub attachments: Option<Vec<Attachment>>,
+    /// Claude session ID for --resume (persisted across app restarts by frontend)
+    pub resume_id: Option<String>,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -300,6 +302,20 @@ pub async fn check_claude_installed(claude_path: Option<String>) -> Result<Strin
     }
 }
 
+/// Clear the in-memory resume session ID for a given session.
+/// Called by frontend when user starts a new conversation to prevent
+/// the fallback HashMap from re-attaching the old resume ID.
+#[tauri::command]
+pub async fn clear_session_resume(
+    state: State<'_, ProcessManager>,
+    session_id: String,
+) -> Result<(), String> {
+    if let Ok(mut sessions) = state.claude_sessions.lock() {
+        sessions.remove(&session_id);
+    }
+    Ok(())
+}
+
 /// Send a message by spawning `node sidecar/bridge.mjs` with stdin piped.
 /// The sidecar bridges the Agent SDK `query()` API and streams NDJSON back.
 /// Uses --resume for multi-turn conversations.
@@ -315,10 +331,15 @@ pub async fn send_message(
     emit_debug(&app, &session_id, "process", &format!("Sidecar: {}", bridge_path));
 
     // Build the "start" message for the sidecar
-    let resume_id = {
-        let sessions = state.claude_sessions.lock().map_err(|e| e.to_string())?;
-        sessions.get(&session_id).cloned()
-    };
+    // Priority: frontend-persisted resume_id > in-memory HashMap
+    let resume_id = request.resume_id
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| {
+            state.claude_sessions.lock().ok()
+                .and_then(|sessions| sessions.get(&session_id).cloned())
+        });
 
     if let Some(ref rid) = resume_id {
         emit_debug(&app, &session_id, "info", &format!("--resume {}", rid));

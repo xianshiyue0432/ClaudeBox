@@ -41,6 +41,10 @@ const en: TranslationDict = {
   "input.attachFiles": "Attach Files",
   "chat.launching": "Claude is starting...",
   "chat.launched": "Claude started",
+  "chat.resumeFrom": "Resume:",
+  "chat.clearSession": "New session",
+  "chat.clearSessionConfirm": "Clear session memory? The next message will start a fresh conversation without previous context.",
+  "chat.sessionCleared": "Session memory cleared. Next message will start fresh.",
 
   // Permission modes
   "mode.default": "Default",
@@ -166,6 +170,10 @@ const zh: TranslationDict = {
   "input.attachFiles": "添加附件",
   "chat.launching": "Claude 启动中...",
   "chat.launched": "Claude 已启动",
+  "chat.resumeFrom": "恢复自：",
+  "chat.clearSession": "新会话",
+  "chat.clearSessionConfirm": "清除会话记忆？下次发送消息将开启全新对话，不保留之前的上下文。",
+  "chat.sessionCleared": "会话记忆已清除，下次发送消息将开启全新对话。",
 
   // Permission modes
   "mode.default": "默认",

@@ -284,7 +284,7 @@ export default function MessageBubble({
   const launchText = blocks[0]?.text;
   const isLaunch = message.streamMessageId === "__launch__" && launchText?.startsWith("__launch__:");
   if (isLaunch) {
-    let info: { pid?: number; sessionId?: string } = {};
+    let info: { pid?: number; sessionId?: string; resumeFrom?: string } = {};
     try { info = JSON.parse((launchText ?? "").replace("__launch__:", "")); } catch { /* */ }
     // Determine "launched" state: either isStreaming is false, or there are real assistant messages after this one
     const hasContentAfter = allMessages.slice(messageIndex + 1).some(
@@ -312,7 +312,12 @@ export default function MessageBubble({
                     PID {info.pid}
                   </span>
                 )}
-                {info.sessionId && (
+                {info.resumeFrom && (
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[10px] font-mono truncate max-w-[220px]">
+                    {t("chat.resumeFrom")} {info.resumeFrom}
+                  </span>
+                )}
+                {info.sessionId && !info.resumeFrom && (
                   <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted text-[10px] font-mono truncate max-w-[180px]">
                     {info.sessionId}
                   </span>

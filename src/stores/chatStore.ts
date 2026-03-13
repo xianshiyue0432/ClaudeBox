@@ -18,6 +18,8 @@ export interface Session {
   allowedTools: string[];
   createdAt: number;
   updatedAt: number;
+  /** Real Claude session ID (from system init message) — used for --resume across app restarts */
+  claudeSessionId?: string;
 }
 
 export const DEFAULT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash"];
@@ -41,10 +43,12 @@ interface ChatState {
   createSession: (projectPath: string, model: string, permissionMode: string) => string;
   removeSession: (id: string) => void;
   switchSession: (id: string) => void;
-  updateSession: (id: string, updates: Partial<Pick<Session, "model" | "permissionMode" | "allowedTools">>) => void;
+  updateSession: (id: string, updates: Partial<Pick<Session, "model" | "permissionMode" | "allowedTools" | "claudeSessionId">>) => void;
+  /** Clear claudeSessionId so the next message starts a fresh session */
+  clearClaudeSession: (id: string) => void;
   addUserMessage: (sessionId: string, content: string, attachments?: { name: string; type: string; path?: string; dataUrl?: string }[]) => void;
   addSystemMessage: (sessionId: string, text: string) => void;
-  addLaunchMessage: (sessionId: string, pid: number) => void;
+  addLaunchMessage: (sessionId: string, pid: number, resumeFrom?: string) => void;
   handleStreamData: (sessionId: string, data: string, stream: string) => void;
   handleStreamDone: (sessionId: string, error?: string) => void;
   setStreaming: (sessionId: string, streaming: boolean) => void;
@@ -246,7 +250,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({
       sessions,
-      currentSessionId: sessions.length > 0 ? sessions[0].id : null,
+      currentSessionId: null,
       messages,
       loaded: true,
     });
@@ -320,6 +324,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ sessions });
   },
 
+  clearClaudeSession: (id) => {
+    const sessions = get().sessions.map((s) =>
+      s.id === id ? { ...s, claudeSessionId: undefined, updatedAt: Date.now() } : s
+    );
+    saveSessions(sessions);
+    set({ sessions });
+  },
+
   addUserMessage: (sessionId, content, attachments) => {
     const msg: ChatMessage = {
       id: v4Style(),
@@ -347,11 +359,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ messages: { ...get().messages, [sessionId]: msgs } });
   },
 
-  addLaunchMessage: (sessionId, pid) => {
+  addLaunchMessage: (sessionId, pid, resumeFrom) => {
     const msg: ChatMessage = {
       id: v4Style(),
       role: "assistant",
-      content: [{ type: "text", text: `__launch__:${JSON.stringify({ pid })}` }],
+      content: [{ type: "text", text: `__launch__:${JSON.stringify({ pid, resumeFrom: resumeFrom || undefined })}` }],
       timestamp: Date.now(),
       isStreaming: true,
       streamMessageId: "__launch__",
@@ -382,6 +394,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
 
       if (event.type === "system") {
+        // Persist Claude session ID for --resume across app restarts
+        if (event.session_id) {
+          const sessions = get().sessions.map((s) =>
+            s.id === sessionId ? { ...s, claudeSessionId: event.session_id, updatedAt: Date.now() } : s
+          );
+          saveSessions(sessions);
+          set({ sessions });
+        }
+
         const launchIdx = msgs.findIndex(
           (m) => m.role === "assistant" && m.streamMessageId === "__launch__"
         );

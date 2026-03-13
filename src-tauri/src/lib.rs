@@ -24,6 +24,7 @@ pub fn run() {
             claude::send_message,
             claude::send_response,
             claude::stop_session,
+            claude::clear_session_resume,
             claude::check_claude_installed,
             claude::get_git_branch,
             claude::open_in_browser,

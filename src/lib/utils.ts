@@ -61,3 +61,23 @@ export function truncate(text: string, maxLength: number): string {
   if (text.length <= maxLength) return text;
   return text.slice(0, maxLength) + "...";
 }
+
+/**
+ * Pre-cache the Tauri window API so startDragging() can be called
+ * synchronously during mousedown — macOS requires this for drag to work.
+ */
+let _getCurrentWindow: (() => { startDragging: () => Promise<void> }) | null = null;
+import("@tauri-apps/api/window")
+  .then((m) => { _getCurrentWindow = m.getCurrentWindow; })
+  .catch(() => {});
+
+/**
+ * Start window dragging programmatically.
+ * Use as onMouseDown handler on drag-region elements.
+ * Skips if the click target is an interactive element (button, input, etc.).
+ */
+export function startWindowDrag(e: React.MouseEvent) {
+  const target = e.target as HTMLElement;
+  if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+  _getCurrentWindow?.().startDragging();
+}

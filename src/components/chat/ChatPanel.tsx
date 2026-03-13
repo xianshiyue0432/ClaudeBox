@@ -1,10 +1,10 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { sendMessage, stopSession, onStream, getGitBranch, sendResponse } from "../../lib/claude-ipc";
+import { sendMessage, stopSession, onStream, getGitBranch, sendResponse, clearSessionResume } from "../../lib/claude-ipc";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
-import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
+import { startWindowDrag } from "../../lib/utils";
 import MessageBubble from "./MessageBubble";
 import InputArea, { type Attachment } from "./InputArea";
 import TaskBoard from "./TaskBoard";
@@ -34,6 +34,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     clearError,
     updateSession,
     clearPendingInteraction,
+    clearClaudeSession,
   } = useChatStore();
 
   const { settings } = useSettingsStore();
@@ -119,6 +120,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       setStreaming(currentSessionId, true);
       clearError();
       try {
+        const resumeId = currentSession.claudeSessionId || undefined;
         const pid = await sendMessage({
           session_id: currentSessionId,
           message: content,
@@ -136,8 +138,9 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             name: a.name,
             type: a.type,
           })),
+          resume_id: resumeId,
         });
-        addLaunchMessage(currentSessionId, pid);
+        addLaunchMessage(currentSessionId, pid, resumeId);
       } catch (err) {
         handleStreamDone(currentSessionId, String(err));
       }
@@ -171,6 +174,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     },
     [currentSessionId, updateSession]
   );
+
+  const handleClearSession = useCallback(() => {
+    if (!currentSessionId) return;
+    clearClaudeSession(currentSessionId);
+    // Also clear the in-memory resume ID on Rust side to prevent fallback
+    clearSessionResume(currentSessionId).catch(() => {});
+    addSystemMessage(currentSessionId, t("chat.sessionCleared"));
+  }, [currentSessionId, clearClaudeSession, addSystemMessage, t]);
 
   /** Send a response to the sidecar when user answers an interactive tool (AskUserQuestion / ExitPlanMode) */
   const handleRespond = useCallback(
@@ -213,7 +224,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         {/* Draggable titlebar area */}
         <div
           data-tauri-drag-region
-          className="h-12 flex-shrink-0"
+          onMouseDown={startWindowDrag}
+          className="h-14 flex-shrink-0"
         />
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center px-8">
@@ -241,17 +253,13 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       {/* Session header (also draggable) */}
       <div
         data-tauri-drag-region
-        className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/50 h-12 flex-shrink-0"
+        onMouseDown={startWindowDrag}
+        className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-bg-secondary/50 h-14 flex-shrink-0"
       >
         <FolderOpen size={14} className="text-text-muted pointer-events-none" />
         <span
-          className="text-sm text-text-secondary truncate max-w-[50%] cursor-pointer hover:text-accent transition-colors"
+          className="text-sm text-text-secondary truncate max-w-[50%] pointer-events-none"
           title={currentSession?.projectPath}
-          onClick={() => {
-            if (currentSession?.projectPath) {
-              shellOpen(currentSession.projectPath);
-            }
-          }}
         >
           {currentSession?.projectName}
         </span>
@@ -356,6 +364,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                 gitBranch={gitBranch}
                 allowedTools={currentSession?.allowedTools || []}
                 onAllowedToolsChange={handleAllowedToolsChange}
+                hasClaudeSession={!!currentSession?.claudeSessionId}
+                onClearSession={handleClearSession}
               />
             </>
           )}

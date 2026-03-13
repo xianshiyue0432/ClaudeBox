@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch,
   Wrench, Check, Paperclip, X, FileCode2, FileText,
-  Image, FileType, Terminal, Globe, Settings2, Cpu, Shield,
+  Image, FileType, Terminal, Globe, Settings2, Cpu, Shield, Eraser,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readImageBase64 } from "../../lib/claude-ipc";
@@ -80,6 +80,10 @@ interface InputAreaProps {
   gitBranch?: string | null;
   allowedTools?: string[];
   onAllowedToolsChange?: (tools: string[]) => void;
+  /** Whether session has a resumable claude session id */
+  hasClaudeSession?: boolean;
+  /** Callback to clear the session memory */
+  onClearSession?: () => void;
 }
 
 const ALL_TOOLS = [
@@ -324,6 +328,7 @@ export default function InputArea({
   gitBranch,
   allowedTools = [],
   onAllowedToolsChange,
+  onClearSession,
 }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -474,6 +479,21 @@ export default function InputArea({
             {/* Inline toolbar */}
             {onModelChange && onPermissionModeChange && (
               <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                {/* Clear session button — always visible when callback exists */}
+                {onClearSession && (
+                  <>
+                    <button
+                      onClick={() => onClearSession()}
+                      className="flex items-center justify-center w-6 h-6 rounded-md text-xs
+                                 text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50
+                                 transition-colors"
+                      title={t("chat.clearSession")}
+                    >
+                      <Eraser size={12} className="flex-shrink-0" />
+                    </button>
+                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                  </>
+                )}
                 {models.length > 0 ? (
                   <DropdownSelect
                     value={model}

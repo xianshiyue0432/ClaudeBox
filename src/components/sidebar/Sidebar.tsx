@@ -18,6 +18,7 @@ import SessionList from "./SessionList";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useT } from "../../lib/i18n";
+import { startWindowDrag } from "../../lib/utils";
 import type { UpdateStatus } from "../../lib/updater";
 
 interface SidebarProps {
@@ -180,7 +181,7 @@ export default function Sidebar({
     return (
       <div className="w-[70px] border-r border-border bg-bg-secondary flex flex-col items-center">
         {/* macOS traffic light spacing */}
-        <div data-tauri-drag-region className="h-12 w-full flex-shrink-0" />
+        <div data-tauri-drag-region onMouseDown={startWindowDrag} className="h-12 w-full flex-shrink-0" />
         <button
           onClick={() => setCollapsed(false)}
           className="p-2 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"
@@ -240,11 +241,14 @@ export default function Sidebar({
       {/* Header — with macOS traffic light inset */}
       <div
         data-tauri-drag-region
-        className="flex items-center justify-between pl-[78px] pr-3 h-14 flex-shrink-0"
+        onMouseDown={startWindowDrag}
+        className="flex items-center pl-[78px] pr-3 h-14 flex-shrink-0"
       >
-        <h1 className="text-sm font-bold text-text-primary tracking-wide pointer-events-none mt-2">
+        <h1 data-tauri-drag-region className="text-sm font-bold text-text-primary tracking-wide pointer-events-none mt-2">
           ClaudeBox
         </h1>
+        {/* Drag spacer — fills remaining space for window dragging */}
+        <div className="flex-1" data-tauri-drag-region />
         <button
           onClick={() => setCollapsed(true)}
           className="p-1.5 rounded-lg hover:bg-bg-tertiary/50 text-text-secondary hover:text-text-primary transition-colors"

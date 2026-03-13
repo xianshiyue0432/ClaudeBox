@@ -13,6 +13,8 @@ export interface SendMessageRequest {
   api_key?: string;
   base_url?: string;
   attachments?: { path: string; name: string; type: string }[];
+  /** Claude session ID for --resume (persisted across app restarts) */
+  resume_id?: string;
 }
 
 /** Send a message (spawns claude -p per message, with --resume for multi-turn). Returns PID. */
@@ -23,6 +25,11 @@ export async function sendMessage(request: SendMessageRequest): Promise<number> 
 /** Stop a running claude process */
 export async function stopSession(sessionId: string): Promise<void> {
   return invoke("stop_session", { sessionId });
+}
+
+/** Clear the in-memory resume session ID on Rust side */
+export async function clearSessionResume(sessionId: string): Promise<void> {
+  return invoke("clear_session_resume", { sessionId });
 }
 
 /** Send a response to the sidecar (user answer for AskUserQuestion, plan approval, etc.) */
