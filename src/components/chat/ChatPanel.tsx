@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo, memo } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { sendMessage, stopSession, onStream, getGitBranch, sendResponse, clearSessionResume } from "../../lib/claude-ipc";
+import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal } from "../../lib/claude-ipc";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
@@ -11,7 +11,7 @@ import InputArea, { type Attachment } from "./InputArea";
 import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
-import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, Bot, ChevronDown, ChevronRight, Loader2, CheckCircle } from "lucide-react";
+import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check } from "lucide-react";
 import type { ChatMessage, ContentBlock } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
@@ -24,6 +24,7 @@ interface AgentRun {
   agentMsgIndex: number;
   agentBlock: ContentBlock;
   childIndices: number[]; // indices of messages that belong to this agent run
+  hasResult: boolean;     // whether the Agent's tool_result has been received
 }
 
 function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hidden: Set<number> } {
@@ -39,30 +40,47 @@ function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hi
     );
     if (!agentBlock?.id) continue;
 
-    // Collect all subsequent assistant/system messages until we find the Agent's tool_result
-    // Stop at user messages — they can't be Agent children
+    // The Agent's tool_result gets appended to THIS message (the parent)
+    // by the stream parser, not to a child message.
+    const hasResult = msg.content.some(
+      (b) => b.type === "tool_result" && b.tool_use_id === agentBlock.id
+    );
+
+    // Collect sub-agent assistant messages as children.
+    // When the Agent is done (hasResult), stop at messages that have no tool_use blocks
+    // — those are the parent's continuation text, not sub-agent work.
     const childIndices: number[] = [];
     for (let j = i + 1; j < msgs.length; j++) {
       const child = msgs[j];
-      if (child.role === "user") break; // user messages are never Agent children
-      const hasAgentResult = child.content.some(
-        (b) => b.type === "tool_result" && b.tool_use_id === agentBlock.id
-      );
-      if (hasAgentResult) {
-        childIndices.push(j);
-        hidden.add(j);
-        break;
+      if (child.role === "user") break;
+
+      if (hasResult) {
+        const childHasToolUse = child.content.some((b) => b.type === "tool_use");
+        if (!childHasToolUse) break; // parent's continuation (text/thinking only)
       }
+
       childIndices.push(j);
       hidden.add(j);
     }
 
     if (childIndices.length > 0) {
-      runs.set(i, { agentMsgIndex: i, agentBlock, childIndices });
+      runs.set(i, { agentMsgIndex: i, agentBlock, childIndices, hasResult });
     }
   }
 
   return { runs, hidden };
+}
+
+/** Build a tool name breakdown like "Read x3 / Glob x2 / Bash x1" */
+function toolBreakdown(blocks: ContentBlock[]): string {
+  const counts = new Map<string, number>();
+  for (const b of blocks) {
+    const name = b.name || "Tool";
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => `${name} x${count}`)
+    .join(" / ");
 }
 
 /** Collapsible container for an Agent tool call and all its cross-message children */
@@ -70,12 +88,15 @@ const AgentRunContainer = memo(function AgentRunContainer({
   agentBlock,
   childMessages,
   isStreaming,
+  hasResult,
 }: {
   agentBlock: ContentBlock;
   childMessages: ChatMessage[];
   isStreaming: boolean;
+  hasResult: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const t = useT();
   const input = agentBlock.input || {};
   const description = String(input.description || input.prompt || "Agent").slice(0, 60);
 
@@ -93,10 +114,6 @@ const AgentRunContainer = memo(function AgentRunContainer({
     }
   }
 
-  // Check if agent is done: either tool_result arrived, or session stopped (not streaming + no result)
-  const hasResult = childMessages.some((m) =>
-    m.content.some((b) => b.type === "tool_result" && b.tool_use_id === agentBlock.id)
-  );
   const isDone = hasResult || !isStreaming;
 
   // Find currently running tool
@@ -117,6 +134,8 @@ const AgentRunContainer = memo(function AgentRunContainer({
     }
   }
 
+  const breakdown = toolBlocks.length > 0 ? toolBreakdown(toolBlocks) : "";
+
   return (
     <div className="flex justify-start px-4 mb-0.5">
       <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
@@ -132,25 +151,35 @@ const AgentRunContainer = memo(function AgentRunContainer({
               ) : (
                 <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
               )}
-              <span className="text-accent flex-shrink-0"><Bot size={14} /></span>
-              <span className="text-text-secondary text-xs text-left truncate">
-                Agent: {description}
-              </span>
-              {toolBlocks.length > 0 && (
-                <span className="text-text-muted text-[11px] flex-shrink-0 tabular-nums">
-                  {toolBlocks.length} tools
-                </span>
-              )}
-              <span className="flex-1" />
-              {runningLabel ? (
-                <span className="flex items-center gap-1 text-text-muted text-[11px] flex-shrink-0 max-w-[40%] truncate">
-                  <Loader2 size={11} className="animate-spin flex-shrink-0" />
-                  {runningLabel}
-                </span>
-              ) : isDone ? (
-                <CheckCircle size={13} className="text-success flex-shrink-0" />
+              {isDone ? (
+                <>
+                  <CheckCircle size={13} className="text-success flex-shrink-0" />
+                  <span className="text-text-secondary text-xs text-left truncate">
+                    {description}
+                  </span>
+                  {breakdown && (
+                    <span className="text-text-muted text-[11px] flex-shrink-0">
+                      {breakdown}
+                    </span>
+                  )}
+                </>
               ) : (
-                <Loader2 size={13} className="text-text-muted animate-spin flex-shrink-0" />
+                <>
+                  <Loader2 size={13} className="animate-spin text-accent flex-shrink-0" />
+                  <span className="text-text-secondary text-xs text-left truncate">
+                    {runningLabel || description}
+                  </span>
+                  {breakdown && (
+                    <span className="text-text-muted text-[11px] flex-shrink-0">
+                      {breakdown}
+                    </span>
+                  )}
+                  {!expanded && (
+                    <span className="text-text-muted/50 text-[11px] flex-shrink-0">
+                      {t("tool.clickToExpand")}
+                    </span>
+                  )}
+                </>
               )}
             </button>
             {expanded && (
@@ -173,6 +202,106 @@ const AgentRunContainer = memo(function AgentRunContainer({
     </div>
   );
 });
+
+/** Branch dropdown switcher */
+function BranchSwitcher({
+  branch,
+  projectPath,
+  onBranchChange,
+}: {
+  branch: string;
+  projectPath: string;
+  onBranchChange: (branch: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleOpen = useCallback(async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    try {
+      const list = await listGitBranches(projectPath);
+      // Put current branch first
+      const sorted = [branch, ...list.filter((b) => b !== branch)];
+      setBranches(sorted);
+    } catch {
+      setBranches([branch]);
+    }
+    setOpen(true);
+  }, [open, projectPath, branch]);
+
+  const handleSwitch = useCallback(async (target: string) => {
+    if (target === branch) {
+      setOpen(false);
+      return;
+    }
+    setSwitching(true);
+    try {
+      await checkoutGitBranch(projectPath, target);
+      onBranchChange(target);
+    } catch (e) {
+      console.error("Branch checkout failed:", e);
+    } finally {
+      setSwitching(false);
+      setOpen(false);
+    }
+  }, [branch, projectPath, onBranchChange]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={(e) => { e.stopPropagation(); handleOpen(); }}
+        disabled={switching}
+        className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full
+                   bg-bg-tertiary text-text-muted hover:text-text-primary hover:bg-bg-tertiary/80
+                   transition-colors max-w-[180px] cursor-pointer"
+        title={t("branch.switch")}
+      >
+        {switching ? (
+          <Loader2 size={11} className="flex-shrink-0 animate-spin" />
+        ) : (
+          <GitBranch size={11} className="flex-shrink-0" />
+        )}
+        <span className="truncate">{branch}</span>
+        <ChevronDown size={10} className="flex-shrink-0 opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute top-full right-0 mt-1 min-w-[160px] max-w-[260px] max-h-[240px]
+                        overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          {branches.map((b) => (
+            <button
+              key={b}
+              onClick={(e) => { e.stopPropagation(); handleSwitch(b); }}
+              className={`flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs transition-colors truncate
+                ${b === branch
+                  ? "text-accent bg-accent/10"
+                  : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30"
+                }`}
+            >
+              {b === branch && <Check size={10} className="flex-shrink-0" />}
+              <span className="truncate">{b}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const {
@@ -341,6 +470,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     addSystemMessage(currentSessionId, t("chat.sessionCleared"));
   }, [currentSessionId, clearClaudeSession, addSystemMessage, t]);
 
+  const handleOpenTerminal = useCallback(() => {
+    if (currentSession?.projectPath) {
+      openInTerminal(currentSession.projectPath).catch(console.error);
+    }
+  }, [currentSession?.projectPath]);
+
   /** Send a response to the sidecar when user answers an interactive tool (AskUserQuestion / ExitPlanMode) */
   const handleRespond = useCallback(
     async (response: Record<string, unknown>) => {
@@ -431,11 +566,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           {currentSession?.projectName}
         </span>
         <div className="flex-1 pointer-events-none" />
-        {gitBranch && (
-          <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-bg-tertiary text-text-muted pointer-events-none max-w-[150px]">
-            <GitBranch size={11} className="flex-shrink-0" />
-            <span className="truncate">{gitBranch}</span>
-          </span>
+        {gitBranch && currentSession?.projectPath && (
+          <BranchSwitcher
+            branch={gitBranch}
+            projectPath={currentSession.projectPath}
+            onBranchChange={setGitBranch}
+          />
         )}
         <button
           onClick={toggleFilePanel}
@@ -511,6 +647,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                             agentBlock={agentRun.agentBlock}
                             childMessages={agentRun.childIndices.map((j) => currentMessages[j])}
                             isStreaming={isStreaming}
+                            hasResult={agentRun.hasResult}
                           />
                         )}
                       </React.Fragment>
@@ -544,6 +681,9 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                 onModelChange={handleModelChange}
                 onPermissionModeChange={handlePermissionModeChange}
                 gitBranch={gitBranch}
+                projectPath={currentSession?.projectPath}
+                onBranchChange={setGitBranch}
+                onOpenTerminal={handleOpenTerminal}
                 allowedTools={currentSession?.allowedTools || []}
                 onAllowedToolsChange={handleAllowedToolsChange}
                 hasClaudeSession={!!currentSession?.claudeSessionId}

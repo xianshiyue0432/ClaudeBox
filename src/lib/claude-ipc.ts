@@ -98,6 +98,16 @@ export async function getGitBranch(cwd: string): Promise<string> {
   return invoke("get_git_branch", { cwd });
 }
 
+/** List local git branches for a directory */
+export async function listGitBranches(cwd: string): Promise<string[]> {
+  return invoke("list_git_branches", { cwd });
+}
+
+/** Checkout a local git branch */
+export async function checkoutGitBranch(cwd: string, branch: string): Promise<string> {
+  return invoke("checkout_git_branch", { cwd, branch });
+}
+
 /** Listen for stream events */
 export function onStream(
   callback: (payload: StreamPayload) => void
@@ -119,6 +129,11 @@ export function onDebug(
 /** Open a URL in the system default browser */
 export async function openInBrowser(url: string): Promise<void> {
   return invoke("open_in_browser", { url });
+}
+
+/** Open a directory in the system terminal */
+export async function openInTerminal(path: string): Promise<void> {
+  return invoke("open_in_terminal", { path });
 }
 
 /** List directory entries */

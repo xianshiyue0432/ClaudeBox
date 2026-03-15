@@ -935,6 +935,47 @@ pub fn get_git_branch(cwd: String) -> Result<String, String> {
     }
 }
 
+/// List local git branches for a directory.
+/// Returns a list of branch names, with the current branch first.
+#[tauri::command]
+pub fn list_git_branches(cwd: String) -> Result<Vec<String>, String> {
+    let output = command_with_path("git")
+        .args(["branch", "--format=%(refname:short)"])
+        .current_dir(&cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err("Not a git repository".to_string());
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let branches: Vec<String> = text
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    Ok(branches)
+}
+
+/// Checkout a local git branch.
+#[tauri::command]
+pub fn checkout_git_branch(cwd: String, branch: String) -> Result<String, String> {
+    let output = command_with_path("git")
+        .args(["checkout", &branch])
+        .current_dir(&cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if output.status.success() {
+        Ok(branch)
+    } else {
+        let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(err)
+    }
+}
+
 /// Open a URL in the system default browser
 #[tauri::command]
 pub fn open_in_browser(url: String) -> Result<(), String> {
@@ -956,6 +997,50 @@ pub fn open_in_browser(url: String) -> Result<(), String> {
     {
         Command::new("cmd")
             .args(["/C", "start", &url])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Open a directory in the system terminal
+#[tauri::command]
+pub fn open_in_terminal(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-a", "Terminal", &path])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Try common terminal emulators in order of popularity
+        let terminals = ["gnome-terminal", "konsole", "xfce4-terminal", "xterm"];
+        let mut launched = false;
+        for term in &terminals {
+            let result = if *term == "gnome-terminal" {
+                Command::new(term)
+                    .args(["--working-directory", &path])
+                    .spawn()
+            } else {
+                Command::new(term)
+                    .current_dir(&path)
+                    .spawn()
+            };
+            if result.is_ok() {
+                launched = true;
+                break;
+            }
+        }
+        if !launched {
+            return Err("No terminal emulator found".into());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("cmd")
+            .args(["/C", "start", "cmd", "/K", &format!("cd /d {}", path)])
             .spawn()
             .map_err(|e| e.to_string())?;
     }

@@ -3,9 +3,10 @@ import {
   Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch,
   Wrench, Check, Paperclip, X, FileCode2, FileText,
   Image, FileType, Terminal, Globe, Settings2, Cpu, Shield, Eraser,
+  Loader2, SquareTerminal,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readImageBase64 } from "../../lib/claude-ipc";
+import { readImageBase64, listGitBranches, checkoutGitBranch } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 
@@ -78,6 +79,9 @@ interface InputAreaProps {
   onModelChange?: (model: string) => void;
   onPermissionModeChange?: (mode: string) => void;
   gitBranch?: string | null;
+  projectPath?: string;
+  onBranchChange?: (branch: string) => void;
+  onOpenTerminal?: () => void;
   allowedTools?: string[];
   onAllowedToolsChange?: (tools: string[]) => void;
   /** Whether session has a resumable claude session id */
@@ -248,6 +252,105 @@ function ToolsSelector({
   );
 }
 
+/** Branch dropdown for inline toolbar */
+function BranchDropdown({
+  branch,
+  projectPath,
+  onBranchChange,
+}: {
+  branch: string;
+  projectPath: string;
+  onBranchChange: (branch: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [switching, setSwitching] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const handleOpen = useCallback(async () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    try {
+      const list = await listGitBranches(projectPath);
+      const sorted = [branch, ...list.filter((b) => b !== branch)];
+      setBranches(sorted);
+    } catch {
+      setBranches([branch]);
+    }
+    setOpen(true);
+  }, [open, projectPath, branch]);
+
+  const handleSwitch = useCallback(async (target: string) => {
+    if (target === branch) {
+      setOpen(false);
+      return;
+    }
+    setSwitching(true);
+    try {
+      await checkoutGitBranch(projectPath, target);
+      onBranchChange(target);
+    } catch (e) {
+      console.error("Branch checkout failed:", e);
+    } finally {
+      setSwitching(false);
+      setOpen(false);
+    }
+  }, [branch, projectPath, onBranchChange]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={handleOpen}
+        disabled={switching}
+        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
+                   text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50
+                   transition-colors cursor-pointer"
+        title={t("branch.switch")}
+      >
+        {switching ? (
+          <Loader2 size={11} className="flex-shrink-0 animate-spin" />
+        ) : (
+          <GitBranch size={11} className="flex-shrink-0" />
+        )}
+        <span className="truncate max-w-[100px]">{branch}</span>
+        <ChevronDown size={10} className="flex-shrink-0 opacity-50" />
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1 min-w-[160px] max-w-[260px] max-h-[240px]
+                        overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          {branches.map((b) => (
+            <button
+              key={b}
+              onClick={() => handleSwitch(b)}
+              className={`flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs transition-colors truncate
+                ${b === branch
+                  ? "text-accent bg-accent/10"
+                  : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30"
+                }`}
+            >
+              {b === branch && <Check size={10} className="flex-shrink-0" />}
+              <span className="truncate">{b}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Single attachment chip */
 function AttachmentChip({
   att,
@@ -326,6 +429,9 @@ export default function InputArea({
   onModelChange,
   onPermissionModeChange,
   gitBranch,
+  projectPath,
+  onBranchChange,
+  onOpenTerminal,
   allowedTools = [],
   onAllowedToolsChange,
   onClearSession,
@@ -550,13 +656,28 @@ export default function InputArea({
                     />
                   </>
                 )}
-                {gitBranch && (
+                {gitBranch && projectPath && onBranchChange && (
                   <>
                     <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
-                    <span className="flex items-center gap-1 text-xs text-text-muted flex-shrink-0">
-                      <GitBranch size={11} />
-                      <span className="truncate max-w-[100px]">{gitBranch}</span>
-                    </span>
+                    <BranchDropdown
+                      branch={gitBranch}
+                      projectPath={projectPath}
+                      onBranchChange={onBranchChange}
+                    />
+                  </>
+                )}
+                {onOpenTerminal && (
+                  <>
+                    <span className="text-border/40 mx-0.5 flex-shrink-0">|</span>
+                    <button
+                      onClick={onOpenTerminal}
+                      className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
+                                 text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50
+                                 transition-colors"
+                      title={t("input.openTerminal")}
+                    >
+                      <SquareTerminal size={13} />
+                    </button>
                   </>
                 )}
               </div>

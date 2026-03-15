@@ -117,6 +117,9 @@ const en: TranslationDict = {
   "tool.explorationSteps": "{count} exploration steps",
   "tool.removed": "Removed",
   "tool.added": "Added",
+  "tool.agentRunning": "Running",
+  "tool.agentDone": "Done",
+  "tool.clickToExpand": "Click to expand",
 
   // Update
   "update.downloading": "Downloading update v{version}...",
@@ -134,6 +137,13 @@ const en: TranslationDict = {
   "version.restart": "Restart",
   "version.checkUpdate": "Check for Updates",
   "version.checking": "Checking...",
+
+  // Branch
+  "branch.switch": "Switch branch",
+  "branch.switchFailed": "Failed to switch branch",
+
+  // Terminal
+  "input.openTerminal": "Open in Terminal",
 };
 
 const zh: TranslationDict = {
@@ -251,6 +261,9 @@ const zh: TranslationDict = {
   "tool.explorationSteps": "{count} 个探索步骤",
   "tool.removed": "移除",
   "tool.added": "添加",
+  "tool.agentRunning": "运行中",
+  "tool.agentDone": "已完成",
+  "tool.clickToExpand": "点击展开",
 
   // Update
   "update.downloading": "正在下载更新 v{version}...",
@@ -268,6 +281,13 @@ const zh: TranslationDict = {
   "version.restart": "重启",
   "version.checkUpdate": "检查更新",
   "version.checking": "检查中...",
+
+  // Branch
+  "branch.switch": "切换分支",
+  "branch.switchFailed": "切换分支失败",
+
+  // Terminal
+  "input.openTerminal": "在终端中打开",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };
