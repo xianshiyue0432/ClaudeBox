@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useCallback, useState, useMemo, memo } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal } from "../../lib/claude-ipc";
+import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles } from "../../lib/claude-ipc";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
@@ -11,6 +11,7 @@ import InputArea, { type Attachment } from "./InputArea";
 import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
+import NewSessionDialog from "./NewSessionDialog";
 import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check } from "lucide-react";
 import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 
@@ -365,6 +366,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     updateSession,
     clearPendingInteraction,
     clearClaudeSession,
+    clearMessages,
   } = useChatStore();
 
   const { settings } = useSettingsStore();
@@ -376,6 +378,8 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const [showFilePanel, setShowFilePanel] = useState(false);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [activeFileIndex, setActiveFileIndex] = useState(0);
+  const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
 
   const FILE_PANEL_WIDTH = 256; // w-64
 
@@ -402,6 +406,23 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         .catch(() => setGitBranch(null));
     }
   }, [currentSession?.projectPath]);
+
+  // Fetch git diff files when file panel is open, refresh every 5s
+  useEffect(() => {
+    if (!showFilePanel || !currentSession?.projectPath) {
+      setChangedFiles(new Set());
+      return;
+    }
+    const path = currentSession.projectPath;
+    const refresh = () => {
+      gitDiffFiles(path)
+        .then((files) => setChangedFiles(new Set(files)))
+        .catch(() => setChangedFiles(new Set()));
+    };
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => clearInterval(timer);
+  }, [showFilePanel, currentSession?.projectPath]);
 
   useEffect(() => {
     const unlisten = onStream((payload) => {
@@ -508,12 +529,21 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   );
 
   const handleClearSession = useCallback(() => {
+    setShowNewSessionDialog(true);
+  }, []);
+
+  const handleNewSessionConfirm = useCallback((clearHistory: boolean) => {
+    setShowNewSessionDialog(false);
     if (!currentSessionId) return;
     clearClaudeSession(currentSessionId);
-    // Also clear the in-memory resume ID on Rust side to prevent fallback
     clearSessionResume(currentSessionId).catch(() => {});
-    addSystemMessage(currentSessionId, t("chat.sessionCleared"));
-  }, [currentSessionId, clearClaudeSession, addSystemMessage, t]);
+    if (clearHistory) {
+      clearMessages(currentSessionId);
+      addSystemMessage(currentSessionId, t("chat.historyCleared"));
+    } else {
+      addSystemMessage(currentSessionId, t("chat.sessionCleared"));
+    }
+  }, [currentSessionId, clearClaudeSession, clearMessages, addSystemMessage, t]);
 
   const handleOpenTerminal = useCallback(() => {
     if (currentSession?.projectPath) {
@@ -593,6 +623,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   }
 
   return (
+    <>
     <div className="flex-1 flex flex-col h-full">
       {/* Session header */}
       <div
@@ -756,7 +787,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         {/* File panel — tree only, viewer is shown in the chat area */}
         {showFilePanel && currentSession?.projectPath && (
           <div className="w-64 border-l border-border bg-bg-secondary flex-shrink-0">
-            <FileTree rootPath={currentSession.projectPath} onFileSelect={(path) => {
+            <FileTree rootPath={currentSession.projectPath} changedFiles={changedFiles} onFileSelect={(path) => {
               const existing = openFiles.indexOf(path);
               if (existing >= 0) {
                 setActiveFileIndex(existing);
@@ -769,5 +800,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         )}
       </div>
     </div>
+
+    <NewSessionDialog
+      open={showNewSessionDialog}
+      onConfirm={handleNewSessionConfirm}
+      onCancel={() => setShowNewSessionDialog(false)}
+    />
+    </>
   );
 }

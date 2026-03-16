@@ -1058,7 +1058,79 @@ pub fn open_in_terminal(path: String) -> Result<(), String> {
     Ok(())
 }
 
-/// List directory entries
+/// Reveal a file in Finder (macOS) / Explorer (Windows) / file manager (Linux)
+#[tauri::command]
+pub fn reveal_in_finder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let is_dir = std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false);
+        if is_dir {
+            Command::new("open").arg(&path).spawn().map_err(|e| e.to_string())?;
+        } else {
+            Command::new("open").args(["-R", &path]).spawn().map_err(|e| e.to_string())?;
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // Try xdg-open on the parent directory
+        let target = if std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false) {
+            path.clone()
+        } else {
+            std::path::Path::new(&path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or(path)
+        };
+        Command::new("xdg-open").arg(&target).spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let is_dir = std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false);
+        if is_dir {
+            Command::new("explorer").arg(&path).spawn().map_err(|e| e.to_string())?;
+        } else {
+            Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Get list of files with uncommitted changes (staged + unstaged + untracked)
+#[tauri::command]
+pub fn git_diff_files(cwd: String) -> Result<Vec<String>, String> {
+    let output = command_with_path("git")
+        .args(["status", "--porcelain=v1"])
+        .current_dir(&cwd)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Ok(vec![]);
+    }
+    let root = cwd.trim_end_matches('/');
+    let text = String::from_utf8_lossy(&output.stdout);
+    let files: Vec<String> = text
+        .lines()
+        .filter(|l| l.len() > 3)
+        .filter_map(|l| {
+            let rel = l[3..].trim();
+            // Handle rename "old -> new": take the "new" path
+            let rel = if let Some(idx) = rel.find(" -> ") {
+                &rel[idx + 4..]
+            } else {
+                rel
+            };
+            if rel.is_empty() { None } else { Some(format!("{}/{}", root, rel)) }
+        })
+        .collect();
+    Ok(files)
+}
+
+
 #[derive(Clone, Serialize)]
 pub struct DirEntry {
     pub name: String,

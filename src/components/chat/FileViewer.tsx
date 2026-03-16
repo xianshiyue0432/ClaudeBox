@@ -291,14 +291,29 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     );
   }
 
-  // ── Default: code with syntax highlighting ──
+  // ── Default: code with syntax highlighting + line numbers ──
+  const lines = content?.split("\n") ?? [];
   return (
     <>
       {metaBar}
       <div className="flex-1 overflow-auto bg-code-bg">
-        <pre className="p-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
-          <code ref={codeRef} className={lang ? `language-${lang}` : ""}>{content}</code>
-        </pre>
+        <div className="flex min-w-0">
+          {/* Line numbers */}
+          <div
+            aria-hidden
+            className="select-none flex-shrink-0 text-right py-3 pr-3 pl-3
+                       text-[0.75rem] leading-[1.6] text-text-muted/30 bg-code-bg
+                       border-r border-border/20 font-mono"
+          >
+            {lines.map((_, i) => (
+              <div key={i}>{i + 1}</div>
+            ))}
+          </div>
+          {/* Code */}
+          <pre className="flex-1 py-3 px-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre [overflow-wrap:normal] overflow-x-auto">
+            <code ref={codeRef} className={lang ? `language-${lang}` : ""}>{content}</code>
+          </pre>
+        </div>
       </div>
     </>
   );

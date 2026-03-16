@@ -46,6 +46,13 @@ const en: TranslationDict = {
   "chat.clearSession": "New session",
   "chat.clearSessionConfirm": "Clear session memory? The next message will start a fresh conversation without previous context.",
   "chat.sessionCleared": "Session memory cleared. Next message will start fresh.",
+  "chat.newSession.title": "Start New Session",
+  "chat.newSession.desc": "This will reset Claude's memory. Your conversation history will be preserved unless you choose to clear it.",
+  "chat.newSession.clearHistory": "Also clear chat history",
+  "chat.newSession.clearHistoryHint": "Permanently removes all messages in this session",
+  "chat.newSession.confirm": "Start New Session",
+  "chat.newSession.cancel": "Cancel",
+  "chat.historyCleared": "Chat history cleared.",
   "chat.stoppedByUser": "Generation stopped by user",
 
   // Permission modes
@@ -84,6 +91,8 @@ const en: TranslationDict = {
   "files.loading": "Loading...",
   "files.noFiles": "No files",
   "files.empty": "Empty",
+  "files.revealInFinder": "Reveal in Finder",
+  "files.openInFinder": "Open in Finder",
 
   // FileViewer
   "viewer.lines": "lines",
@@ -195,6 +204,13 @@ const zh: TranslationDict = {
   "chat.clearSession": "新会话",
   "chat.clearSessionConfirm": "清除会话记忆？下次发送消息将开启全新对话，不保留之前的上下文。",
   "chat.sessionCleared": "会话记忆已清除，下次发送消息将开启全新对话。",
+  "chat.newSession.title": "开启新会话",
+  "chat.newSession.desc": "此操作将重置 Claude 的记忆，下次对话将从头开始。历史聊天记录默认保留，可勾选下方选项一并清除。",
+  "chat.newSession.clearHistory": "同时清除历史聊天记录",
+  "chat.newSession.clearHistoryHint": "将永久删除本会话中的所有消息",
+  "chat.newSession.confirm": "确认开启",
+  "chat.newSession.cancel": "取消",
+  "chat.historyCleared": "历史聊天记录已清除。",
   "chat.stoppedByUser": "用户已停止生成",
 
   // Permission modes
@@ -233,6 +249,8 @@ const zh: TranslationDict = {
   "files.loading": "加载中...",
   "files.noFiles": "没有文件",
   "files.empty": "空",
+  "files.revealInFinder": "在 Finder 中显示",
+  "files.openInFinder": "在 Finder 中打开",
 
   // FileViewer
   "viewer.lines": "行",

@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
-import { listDir, type DirEntry } from "../../lib/claude-ipc";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { listDir, revealInFinder, type DirEntry } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 import {
   ChevronRight,
@@ -12,6 +12,8 @@ import {
   File,
   RefreshCw,
 } from "lucide-react";
+
+// ── File icons ───────────────────────────────────────────────────────
 
 const EXT_ICONS: Record<string, React.ReactNode> = {
   ts: <FileCode size={14} className="text-blue-400" />,
@@ -35,34 +37,92 @@ function getFileIcon(name: string): React.ReactNode {
   return EXT_ICONS[ext] || <File size={14} className="text-text-muted" />;
 }
 
-function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: number; onFileSelect?: (path: string) => void }) {
+// ── Context menu ─────────────────────────────────────────────────────
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  entry: DirEntry;
+}
+
+function ContextMenu({ menu, onClose }: { menu: ContextMenuState; onClose: () => void }) {
+  const t = useT();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const handleReveal = useCallback(() => {
+    revealInFinder(menu.entry.path).catch(() => {});
+    onClose();
+  }, [menu.entry.path, onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="fixed z-50 min-w-[160px] rounded-lg border border-border bg-bg-secondary shadow-xl py-1 animate-fade-in"
+      style={{ left: menu.x, top: menu.y }}
+    >
+      <button
+        onClick={handleReveal}
+        className="w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-accent/10 hover:text-text-primary transition-colors"
+      >
+        {menu.entry.is_dir ? t("files.openInFinder") : t("files.revealInFinder")}
+      </button>
+    </div>
+  );
+}
+
+// ── TreeNode ──────────────────────────────────────────────────────────
+
+function TreeNode({
+  entry,
+  depth,
+  changedFiles,
+  onFileSelect,
+  onContextMenu,
+}: {
+  entry: DirEntry;
+  depth: number;
+  changedFiles: Set<string>;
+  onFileSelect?: (path: string) => void;
+  onContextMenu: (e: React.MouseEvent, entry: DirEntry) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<DirEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const t = useT();
 
   const toggle = useCallback(async () => {
-    if (!entry.is_dir) {
-      onFileSelect?.(entry.path);
-      return;
-    }
+    if (!entry.is_dir) { onFileSelect?.(entry.path); return; }
     if (!expanded && children === null) {
       setLoading(true);
-      try {
-        const items = await listDir(entry.path);
-        setChildren(items);
-      } catch {
-        setChildren([]);
-      }
+      try { setChildren(await listDir(entry.path)); }
+      catch { setChildren([]); }
       setLoading(false);
     }
     setExpanded(!expanded);
   }, [entry, expanded, children, onFileSelect]);
 
+  const isChanged = entry.is_dir
+    ? [...changedFiles].some((f) => f.startsWith(entry.path + "/"))
+    : changedFiles.has(entry.path);
+
   return (
     <div>
       <button
         onClick={toggle}
+        onContextMenu={(e) => onContextMenu(e, entry)}
         className={`flex items-center gap-1.5 w-full text-left py-1 pr-2 text-xs
                     hover:bg-accent/10 active:bg-accent/15 transition-colors rounded-sm
                     ${entry.is_dir ? "text-text-primary" : "text-text-secondary hover:text-text-primary"}`}
@@ -70,11 +130,9 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
       >
         {entry.is_dir ? (
           <>
-            {expanded ? (
-              <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
-            ) : (
-              <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
-            )}
+            {expanded
+              ? <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+              : <ChevronRight size={12} className="text-text-muted flex-shrink-0" />}
             <Folder size={14} className="text-accent/70 flex-shrink-0" />
           </>
         ) : (
@@ -83,27 +141,25 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
             {getFileIcon(entry.name)}
           </>
         )}
-        <span className="truncate">{entry.name}</span>
+        <span className="truncate flex-1">{entry.name}</span>
+        {isChanged && (
+          <span className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1" title="Uncommitted changes" />
+        )}
       </button>
       {entry.is_dir && expanded && (
         <div>
           {loading && (
-            <div
-              className="flex items-center gap-1.5 py-1 text-xs text-text-muted"
-              style={{ paddingLeft: `${(depth + 1) * 14 + 6}px` }}
-            >
+            <div className="flex items-center gap-1.5 py-1 text-xs text-text-muted" style={{ paddingLeft: `${(depth + 1) * 14 + 6}px` }}>
               <RefreshCw size={10} className="animate-spin" />
               {t("files.loading")}
             </div>
           )}
           {children?.map((child) => (
-            <TreeNode key={child.path} entry={child} depth={depth + 1} onFileSelect={onFileSelect} />
+            <TreeNode key={child.path} entry={child} depth={depth + 1}
+              changedFiles={changedFiles} onFileSelect={onFileSelect} onContextMenu={onContextMenu} />
           ))}
           {children?.length === 0 && !loading && (
-            <div
-              className="py-1 text-xs text-text-muted italic"
-              style={{ paddingLeft: `${(depth + 1) * 14 + 6}px` }}
-            >
+            <div className="py-1 text-xs text-text-muted italic" style={{ paddingLeft: `${(depth + 1) * 14 + 6}px` }}>
               {t("files.empty")}
             </div>
           )}
@@ -113,57 +169,60 @@ function TreeNode({ entry, depth, onFileSelect }: { entry: DirEntry; depth: numb
   );
 }
 
+// ── FileTree ──────────────────────────────────────────────────────────
+
 interface FileTreeProps {
   rootPath: string;
+  changedFiles?: Set<string>;
   onFileSelect?: (path: string) => void;
 }
 
-export default function FileTree({ rootPath, onFileSelect }: FileTreeProps) {
+export default function FileTree({ rootPath, changedFiles = new Set(), onFileSelect }: FileTreeProps) {
   const [entries, setEntries] = useState<DirEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const t = useT();
 
   const loadRoot = useCallback(async () => {
     setLoading(true);
-    try {
-      const items = await listDir(rootPath);
-      setEntries(items);
-    } catch {
-      setEntries([]);
-    }
+    try { setEntries(await listDir(rootPath)); }
+    catch { setEntries([]); }
     setLoading(false);
   }, [rootPath]);
 
-  useEffect(() => {
-    loadRoot();
-  }, [loadRoot]);
+  useEffect(() => { loadRoot(); }, [loadRoot]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, entry: DirEntry) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const x = Math.min(e.clientX, window.innerWidth - 180);
+    const y = Math.min(e.clientY, window.innerHeight - 60);
+    setContextMenu({ x, y, entry });
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
         <span className="text-xs font-medium text-text-secondary">{t("files.title")}</span>
-        <button
-          onClick={loadRoot}
-          className="p-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
-          title={t("files.refresh")}
-        >
+        <button onClick={loadRoot} className="p-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors" title={t("files.refresh")}>
           <RefreshCw size={12} />
         </button>
       </div>
       <div className="flex-1 overflow-y-auto py-1">
         {loading ? (
           <div className="flex items-center gap-2 px-3 py-4 text-xs text-text-muted">
-            <RefreshCw size={12} className="animate-spin" />
-            {t("files.loading")}
+            <RefreshCw size={12} className="animate-spin" />{t("files.loading")}
           </div>
         ) : entries.length === 0 ? (
           <div className="px-3 py-4 text-xs text-text-muted">{t("files.noFiles")}</div>
         ) : (
           entries.map((entry) => (
-            <TreeNode key={entry.path} entry={entry} depth={0} onFileSelect={onFileSelect} />
+            <TreeNode key={entry.path} entry={entry} depth={0}
+              changedFiles={changedFiles} onFileSelect={onFileSelect} onContextMenu={handleContextMenu} />
           ))
         )}
       </div>
+      {contextMenu && <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />}
     </div>
   );
 }

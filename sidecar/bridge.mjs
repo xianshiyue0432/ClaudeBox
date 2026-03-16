@@ -477,6 +477,16 @@ async function main() {
     options.allowedTools = allowedTools;
   }
 
+  // Workspace boundary — prevent Claude from writing outside the project
+  if (cwd) {
+    const root = cwd.replace(/\/+$/, "");
+    options.systemPrompt = {
+      type: "preset",
+      preset: "claude_code",
+      append: `\n## Workspace Boundary (CRITICAL)\nProject root: ${root}\nALL file operations and Bash commands MUST stay within \`${root}/\`. NEVER create/modify files outside it. NEVER invent non-existent directories — verify with ls/Glob first. When unsure, ask the user.`,
+    };
+  }
+
   try {
     // Process file attachments — append to prompt as text
     let finalPrompt = prompt;

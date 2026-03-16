@@ -131,6 +131,16 @@ export async function openInBrowser(url: string): Promise<void> {
   return invoke("open_in_browser", { url });
 }
 
+/** Reveal a file or folder in Finder / Explorer */
+export async function revealInFinder(path: string): Promise<void> {
+  return invoke("reveal_in_finder", { path });
+}
+
+/** Get list of files with uncommitted git changes (absolute paths) */
+export async function gitDiffFiles(cwd: string): Promise<string[]> {
+  return invoke("git_diff_files", { cwd });
+}
+
 /** Open a directory in the system terminal */
 export async function openInTerminal(path: string): Promise<void> {
   return invoke("open_in_terminal", { path });

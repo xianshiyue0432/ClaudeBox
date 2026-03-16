@@ -37,6 +37,8 @@ pub fn run() {
             claude::checkout_git_branch,
             claude::open_in_browser,
             claude::open_in_terminal,
+            claude::reveal_in_finder,
+            claude::git_diff_files,
             claude::list_dir,
             claude::read_file,
             claude::read_image_base64,

@@ -46,6 +46,8 @@ interface ChatState {
   updateSession: (id: string, updates: Partial<Pick<Session, "model" | "permissionMode" | "allowedTools" | "claudeSessionId">>) => void;
   /** Clear claudeSessionId so the next message starts a fresh session */
   clearClaudeSession: (id: string) => void;
+  /** Clear all chat messages for a session (history wipe) */
+  clearMessages: (id: string) => void;
   addUserMessage: (sessionId: string, content: string, attachments?: { name: string; type: string; path?: string; dataUrl?: string }[]) => void;
   addSystemMessage: (sessionId: string, text: string) => void;
   addLaunchMessage: (sessionId: string, pid: number, resumeFrom?: string) => void;
@@ -330,6 +332,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
     saveSessions(sessions);
     set({ sessions });
+  },
+
+  clearMessages: (id) => {
+    removeMessages(id);
+    const messages = { ...get().messages };
+    delete messages[id];
+    set({ messages });
   },
 
   addUserMessage: (sessionId, content, attachments) => {
