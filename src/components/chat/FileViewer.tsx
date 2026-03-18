@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { X, Copy, Check, Loader2, Code2, Eye } from "lucide-react";
+import { X, Copy, Check, Loader2, Code2, Eye, Minus } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfmSafe from "../../lib/remark-gfm-safe";
 import { readFile, readImageBase64 } from "../../lib/claude-ipc";
@@ -13,16 +13,12 @@ const remarkPlugins = [remarkGfmSafe];
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface FileViewerProps {
-  /** Ordered list of open file paths */
   files: string[];
-  /** Index of the currently active tab */
   activeIndex: number;
-  /** Switch to a tab */
   onSelectTab: (index: number) => void;
-  /** Close a single tab */
   onCloseTab: (index: number) => void;
-  /** Close all tabs (exit viewer) */
   onCloseAll: () => void;
+  onMinimize: () => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -293,7 +289,7 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     );
   }
 
-  // ── Default: code with syntax highlighting + line numbers ──
+  // ── Default: code with syntax highlighting ──
   const lines = content?.split("\n") ?? [];
   return (
     <>
@@ -311,8 +307,8 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
               <div key={i}>{i + 1}</div>
             ))}
           </div>
-          {/* Code */}
-          <pre className="flex-1 py-3 px-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre [overflow-wrap:normal] overflow-x-auto">
+          {/* Code with word wrap */}
+          <pre className="flex-1 py-3 px-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
             <code ref={codeRef} className={lang ? `language-${lang}` : ""}>{content}</code>
           </pre>
         </div>
@@ -329,6 +325,7 @@ export default function FileViewer({
   onSelectTab,
   onCloseTab,
   onCloseAll,
+  onMinimize,
 }: FileViewerProps) {
   const t = useT();
   const tabBarRef = useRef<HTMLDivElement>(null);
@@ -391,10 +388,16 @@ export default function FileViewer({
             );
           })}
         </div>
-        {/* Close all button */}
+        <button
+          onClick={onMinimize}
+          className="flex-shrink-0 p-1.5 mx-0.5 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
+          title={t("viewer.minimize")}
+        >
+          <Minus size={14} />
+        </button>
         <button
           onClick={onCloseAll}
-          className="flex-shrink-0 p-1.5 mx-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
+          className="flex-shrink-0 p-1.5 mr-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
           title={t("viewer.closeAll")}
         >
           <X size={14} />

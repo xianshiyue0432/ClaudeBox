@@ -1,4 +1,4 @@
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { check, type Update, type DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { emitDebug, probeUrl } from "./claude-ipc";
 
@@ -132,7 +132,7 @@ export async function checkAndDownloadUpdate(
     let receivedBytes = 0;
     let lastLogPercent = 0;
 
-    await update.downloadAndInstall((event) => {
+    await update.downloadAndInstall((event: DownloadEvent) => {
       switch (event.event) {
         case "Started":
           totalBytes = event.data.contentLength ?? null;

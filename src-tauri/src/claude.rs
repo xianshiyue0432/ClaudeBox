@@ -219,7 +219,15 @@ pub async fn probe_url(url: String) -> Result<ProbeResult, String> {
 
         #[cfg(target_os = "macos")]
         let mut cmd = Command::new("/usr/bin/curl");
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        let mut cmd = {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut c = Command::new("curl");
+            c.creation_flags(CREATE_NO_WINDOW);
+            c
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let mut cmd = Command::new("curl");
 
         cmd.args(["-sS", "-f", "-L", "--max-time", "15"]);
@@ -1025,8 +1033,11 @@ pub fn open_in_browser(url: String) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         Command::new("cmd")
             .args(["/C", "start", &url])
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| e.to_string())?;
     }

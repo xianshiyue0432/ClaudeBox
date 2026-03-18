@@ -627,12 +627,12 @@ export default function InputArea({
             <button
               onClick={handleAttach}
               disabled={disabled}
-              className="flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0
-                         text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors
+              className="flex items-center justify-center p-1.5 rounded-lg flex-shrink-0
+                         text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors
                          disabled:opacity-30 disabled:cursor-not-allowed"
               title={t("input.attach")}
             >
-              <Paperclip size={16} />
+              <Paperclip size={14} />
             </button>
 
             {/* Inline toolbar */}
@@ -644,7 +644,7 @@ export default function InputArea({
                     <button
                       onClick={onClearSession}
                       className="flex items-center gap-1 rounded-md text-xs px-1.5 py-0.5
-                                 text-text-muted hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors"
+                                 text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors"
                       title={t("chat.clearSession")}
                     >
                       <Eraser size={12} className="flex-shrink-0" />

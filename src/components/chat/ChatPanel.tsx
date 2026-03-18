@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useCallback, useState, useMemo, memo } from "react";
+import React, { useEffect, useRef, useCallback, useState, useMemo, memo, useLayoutEffect } from "react";
 import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles } from "../../lib/claude-ipc";
-import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
 import MessageBubble from "./MessageBubble";
@@ -13,7 +13,7 @@ import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
 import NewSessionDialog from "./NewSessionDialog";
-import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check } from "lucide-react";
+import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check, FileText } from "lucide-react";
 import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
@@ -348,6 +348,18 @@ function BranchSwitcher({
   );
 }
 
+/** 返回"倒数第 showLastN 轮对话"的起始消息索引（以 user 消息为轮次起点） */
+function getTurnStartIndex(messages: ChatMessage[], showLastN: number): number {
+  let turnsFound = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "user") {
+      turnsFound++;
+      if (turnsFound >= showLastN) return i;
+    }
+  }
+  return 0;
+}
+
 export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const {
     currentSessionId,
@@ -374,32 +386,62 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   const { markAllCompleted } = useTaskStore();
   const t = useT();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const msgScrollRef = useRef<HTMLDivElement>(null);
+  const loadingMoreTurns = useRef(false);
+  const prevScrollHeight = useRef(0);
+  const lastScrollTop = useRef(0);
+  const overscrollRef = useRef(0);
+  const resetPullTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentSession = sessions.find((s) => s.id === currentSessionId);
   const isStreaming = currentSessionId ? !!streamingSessions[currentSessionId] : false;
   const [gitBranch, setGitBranch] = useState<string | null>(null);
+  const [visibleTurns, setVisibleTurns] = useState(3);
+  const [pullProgress, setPullProgress] = useState(0);   // 0–1，下拉进度
+  const [pullTriggered, setPullTriggered] = useState(false); // 已触发，展示全速转圈
   const [showFilePanel, setShowFilePanel] = useState(false);
-  const [openFiles, setOpenFiles] = useState<string[]>([]);
-  const [activeFileIndex, setActiveFileIndex] = useState(0);
+  // Per-session viewer state: each session independently remembers its open files,
+  // active tab, and whether the viewer is minimized.
+  const [sessionViewerStates, setSessionViewerStates] = useState<
+    Record<string, { files: string[]; activeIndex: number; minimized: boolean }>
+  >({});
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
   const toolNameMapRef = useRef<Map<string, string>>(new Map());
 
-  const FILE_PANEL_WIDTH = 256; // w-64
+  // Derive current session's viewer state
+  const currentViewerState = currentSessionId
+    ? (sessionViewerStates[currentSessionId] ?? { files: [], activeIndex: 0, minimized: false })
+    : { files: [], activeIndex: 0, minimized: false };
+  const openFiles = currentViewerState.files;
+  const activeFileIndex = currentViewerState.activeIndex;
+  const isViewerMinimized = currentViewerState.minimized;
 
-  const toggleFilePanel = useCallback(async () => {
+  const updateViewerState = useCallback(
+    (updates: Partial<{ files: string[]; activeIndex: number; minimized: boolean }>) => {
+      if (!currentSessionId) return;
+      setSessionViewerStates((prev) => {
+        const existing = prev[currentSessionId] ?? { files: [], activeIndex: 0, minimized: false };
+        return { ...prev, [currentSessionId]: { ...existing, ...updates } };
+      });
+    },
+    [currentSessionId]
+  );
+
+  const toggleFilePanel = useCallback(() => {
     const next = !showFilePanel;
     setShowFilePanel(next);
-    if (!next) { setOpenFiles([]); setActiveFileIndex(0); }
-    try {
-      const win = getCurrentWindow();
-      const size = await win.outerSize();
-      const delta = next ? FILE_PANEL_WIDTH : -FILE_PANEL_WIDTH;
-      await win.setSize(new PhysicalSize(size.width + delta, size.height));
-    } catch {
-      // ignore — window API may not be available in dev
-    }
-  }, [showFilePanel]);
+    if (!next) { updateViewerState({ files: [], activeIndex: 0, minimized: false }); }
+  }, [showFilePanel, updateViewerState]);
+
+  // 切换 session 时重置可见轮次
+  useEffect(() => {
+    setVisibleTurns(3);
+    lastScrollTop.current = 0;
+    overscrollRef.current = 0;
+    setPullProgress(0);
+    setPullTriggered(false);
+  }, [currentSessionId]);
 
   // Fetch git branch when session changes
   useEffect(() => {
@@ -591,6 +633,71 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     ? messages[currentSessionId] || []
     : [];
 
+  // 分轮分页：计算起始索引
+  const msgStartIndex = useMemo(
+    () => getTurnStartIndex(currentMessages, visibleTurns),
+    [currentMessages, visibleTurns]
+  );
+  const hasMoreTurns = msgStartIndex > 0;
+
+  // 加载更多轮次，并恢复滚动位置避免跳动
+  const loadMoreTurns = useCallback(() => {
+    const el = msgScrollRef.current;
+    if (!el) return;
+    loadingMoreTurns.current = true;
+    prevScrollHeight.current = el.scrollHeight;
+    setVisibleTurns((n) => n + 3);
+  }, []);
+
+  // 下拉加载：滚轮在顶部向上滚时累积进度，到阈值后触发
+  const PULL_THRESHOLD = 180; // wheel delta 累积阈值
+  const handleMsgWheel = useCallback((e: React.WheelEvent) => {
+    const el = msgScrollRef.current;
+    if (!el || !hasMoreTurns || loadingMoreTurns.current || pullTriggered) return;
+
+    if (el.scrollTop === 0 && e.deltaY < 0) {
+      overscrollRef.current = Math.min(PULL_THRESHOLD, overscrollRef.current + Math.abs(e.deltaY));
+      const progress = overscrollRef.current / PULL_THRESHOLD;
+      setPullProgress(progress);
+
+      if (overscrollRef.current >= PULL_THRESHOLD) {
+        // 触发：展示全速转圈，短暂延迟后加载
+        overscrollRef.current = 0;
+        setPullTriggered(true);
+        setPullProgress(1);
+        setTimeout(() => {
+          loadMoreTurns();
+          setPullTriggered(false);
+          setPullProgress(0);
+        }, 400);
+        return;
+      }
+
+      // 停止滚动后复位进度
+      if (resetPullTimer.current) clearTimeout(resetPullTimer.current);
+      resetPullTimer.current = setTimeout(() => {
+        overscrollRef.current = 0;
+        setPullProgress(0);
+      }, 300);
+    }
+  }, [hasMoreTurns, pullTriggered, loadMoreTurns]);
+
+  // onScroll 仅用于更新 lastScrollTop（不再负责触发加载）
+  const handleMsgScroll = useCallback(() => {
+    const el = msgScrollRef.current;
+    if (!el) return;
+    lastScrollTop.current = el.scrollTop;
+  }, []);
+
+  // 加载更多后恢复滚动位置
+  useLayoutEffect(() => {
+    if (loadingMoreTurns.current && msgScrollRef.current) {
+      const el = msgScrollRef.current;
+      el.scrollTop = el.scrollHeight - prevScrollHeight.current;
+      loadingMoreTurns.current = false;
+    }
+  });
+
   // Detect Agent runs that span multiple messages
   const { runs: agentRuns, hidden: hiddenIndices } = useMemo(
     () => detectAgentRuns(currentMessages),
@@ -663,6 +770,18 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
         >
           {currentSession?.projectName}
         </span>
+        {/* File preview indicator — toggle minimize/restore */}
+        {openFiles.length > 0 && (
+          <button
+            onClick={() => updateViewerState({ minimized: !isViewerMinimized })}
+            className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full
+                       bg-accent/15 text-accent hover:bg-accent/25 transition-colors flex-shrink-0"
+            title={isViewerMinimized ? t("viewer.restore") : t("viewer.minimize")}
+          >
+            <FileText size={11} />
+            <span>{openFiles.length}</span>
+          </button>
+        )}
         <div className="flex-1 pointer-events-none" />
         {gitBranch && currentSession?.projectPath && (
           <BranchSwitcher
@@ -684,126 +803,152 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       <div className="flex-1 flex min-h-0">
         {/* Chat area */}
         <div className="flex-1 flex flex-col min-w-0">
-          {openFiles.length > 0 ? (
+          {openFiles.length > 0 && !isViewerMinimized ? (
             /* Tabbed file viewer — covers entire chat area for maximum reading space */
             <FileViewer
               files={openFiles}
               activeIndex={activeFileIndex}
-              onSelectTab={setActiveFileIndex}
+              onSelectTab={(i) => updateViewerState({ activeIndex: i })}
               onCloseTab={(index) => {
                 const next = openFiles.filter((_, i) => i !== index);
-                setOpenFiles(next);
+                let nextActive = activeFileIndex;
                 if (next.length === 0) {
-                  setActiveFileIndex(0);
+                  nextActive = 0;
                 } else if (activeFileIndex >= next.length) {
-                  setActiveFileIndex(next.length - 1);
+                  nextActive = next.length - 1;
                 } else if (index < activeFileIndex) {
-                  setActiveFileIndex(activeFileIndex - 1);
+                  nextActive = activeFileIndex - 1;
                 }
+                updateViewerState({ files: next, activeIndex: nextActive });
               }}
-              onCloseAll={() => { setOpenFiles([]); setActiveFileIndex(0); }}
+              onCloseAll={() => updateViewerState({ files: [], activeIndex: 0, minimized: false })}
+              onMinimize={() => updateViewerState({ minimized: true })}
             />
           ) : (
-            <>
-              {/* Messages */}
-              <div className="flex-1 overflow-y-auto pt-4 pb-2">
-                <div className="max-w-3xl mx-auto overflow-hidden">
-                  {currentMessages.length === 0 && (
-                    <div className="text-center py-16 text-text-muted">
-                      <Terminal size={24} className="mx-auto mb-2 opacity-50" />
-                      <p className="text-sm">
-                        {t("chat.emptyHint")}
-                      </p>
-                    </div>
-                  )}
-                  {currentMessages.map((msg, i) => {
-                    // Skip messages that are part of an Agent run (rendered inside AgentRunContainer)
-                    if (hiddenIndices.has(i)) return null;
-
-                    // Only show bot avatar on the first assistant message in a consecutive group
-                    let showAvatar = true;
-                    if (msg.role === "assistant" && i > 0) {
-                      const prev = currentMessages[i - 1];
-                      if (prev.role === "assistant") showAvatar = false;
-                    }
-                    // Last assistant in its consecutive run (before a user msg or end of list)
-                    const isLastInTurn =
-                      msg.role === "assistant" &&
-                      (i + 1 >= currentMessages.length || currentMessages[i + 1].role !== "assistant");
-                    // The very last assistant message overall
-                    const isLastAssistant =
-                      msg.role === "assistant" &&
-                      !currentMessages.slice(i + 1).some((m) => m.role === "assistant");
-
-                    // If this message starts an Agent run, render the container
-                    const agentRun = agentRuns.get(i);
-
-                    return (
-                      <React.Fragment key={msg.id}>
-                        <MessageBubble
-                          message={msg}
-                          allMessages={currentMessages}
-                          messageIndex={i}
-                          showAvatar={showAvatar}
-                          isLastInTurn={!agentRun && isLastInTurn}
-                          isLastAssistant={isLastAssistant}
-                          totalTokens={totalTokens}
-                          streamStartTime={streamStartTime}
-                          pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
-                          onRespond={isLastAssistant ? handleRespond : undefined}
-                          skipAgentBlockId={agentRun?.agentBlock.id}
-                        />
-                        {agentRun && (
-                          <AgentRunContainer
-                            agentBlock={agentRun.agentBlock}
-                            childMessages={agentRun.childIndices.map((j) => currentMessages[j])}
-                            isStreaming={isStreaming}
-                            hasResult={agentRun.hasResult}
-                            pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
-                            onRespond={isLastAssistant ? handleRespond : undefined}
-                          />
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-                </div>
-
-                {streamError && (
-                  <div className="max-w-3xl mx-auto px-4 mb-4">
-                    <div className="rounded-lg bg-error/10 border border-error/30 px-4 py-3 text-error text-sm">
-                      {streamError}
-                    </div>
+            /* Messages */
+            <div ref={msgScrollRef} onScroll={handleMsgScroll} onWheel={handleMsgWheel} className="flex-1 overflow-y-auto pt-4 pb-2">
+              <div className="max-w-3xl mx-auto overflow-hidden">
+                {/* 下拉加载指示器 */}
+                {hasMoreTurns && pullProgress > 0 && (
+                  <div
+                    className="flex justify-center pb-2 transition-all duration-150"
+                    style={{ opacity: pullProgress }}
+                  >
+                    <Loader2
+                      size={16}
+                      className={`text-accent ${pullTriggered ? "animate-spin" : ""}`}
+                      style={!pullTriggered ? { transform: `rotate(${pullProgress * 360}deg)` } : undefined}
+                    />
                   </div>
                 )}
+                {/* 点击加载更多按钮 */}
+                {hasMoreTurns && pullProgress === 0 && (
+                  <div className="text-center pb-3">
+                    <button
+                      onClick={loadMoreTurns}
+                      className="text-xs text-text-muted/60 hover:text-text-muted transition-colors px-3 py-1 rounded-full hover:bg-bg-tertiary/30"
+                    >
+                      ↑ 查看更早的对话
+                    </button>
+                  </div>
+                )}
+                {currentMessages.length === 0 && (
+                  <div className="text-center py-16 text-text-muted">
+                    <Terminal size={24} className="mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">
+                      {t("chat.emptyHint")}
+                    </p>
+                  </div>
+                )}
+                {currentMessages.map((msg, i) => {
+                  // 分页：只渲染 msgStartIndex 之后的消息
+                  if (i < msgStartIndex) return null;
+                  // Skip messages that are part of an Agent run (rendered inside AgentRunContainer)
+                  if (hiddenIndices.has(i)) return null;
 
-                <div ref={messagesEndRef} />
+                  // Only show bot avatar on the first assistant message in a consecutive group
+                  let showAvatar = true;
+                  if (msg.role === "assistant" && i > 0) {
+                    const prev = currentMessages[i - 1];
+                    if (prev.role === "assistant") showAvatar = false;
+                  }
+                  // Last assistant in its consecutive run (before a user msg or end of list)
+                  const isLastInTurn =
+                    msg.role === "assistant" &&
+                    (i + 1 >= currentMessages.length || currentMessages[i + 1].role !== "assistant");
+                  // The very last assistant message overall
+                  const isLastAssistant =
+                    msg.role === "assistant" &&
+                    !currentMessages.slice(i + 1).some((m) => m.role === "assistant");
+
+                  // If this message starts an Agent run, render the container
+                  const agentRun = agentRuns.get(i);
+
+                  return (
+                    <React.Fragment key={msg.id}>
+                      <MessageBubble
+                        message={msg}
+                        allMessages={currentMessages}
+                        messageIndex={i}
+                        showAvatar={showAvatar}
+                        isLastInTurn={!agentRun && isLastInTurn}
+                        isLastAssistant={isLastAssistant}
+                        totalTokens={totalTokens}
+                        streamStartTime={streamStartTime}
+                        pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
+                        onRespond={isLastAssistant ? handleRespond : undefined}
+                        skipAgentBlockId={agentRun?.agentBlock.id}
+                      />
+                      {agentRun && (
+                        <AgentRunContainer
+                          agentBlock={agentRun.agentBlock}
+                          childMessages={agentRun.childIndices.map((j) => currentMessages[j])}
+                          isStreaming={isStreaming}
+                          hasResult={agentRun.hasResult}
+                          pendingInteraction={isLastAssistant ? pendingInteraction : undefined}
+                          onRespond={isLastAssistant ? handleRespond : undefined}
+                        />
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </div>
 
-              {/* Task Board (above input) */}
-              <TaskBoard sessionId={currentSessionId} />
+              {streamError && (
+                <div className="max-w-3xl mx-auto px-4 mb-4">
+                  <div className="rounded-lg bg-error/10 border border-error/30 px-4 py-3 text-error text-sm">
+                    {streamError}
+                  </div>
+                </div>
+              )}
 
-              {/* Input */}
-              <InputArea
-                onSend={handleSend}
-                onStop={handleStop}
-                isStreaming={isStreaming}
-                disabled={!claudeAvailable}
-                model={currentSession?.model || ""}
-                models={settings.models}
-                permissionMode={currentSession?.permissionMode || ""}
-                onModelChange={handleModelChange}
-                onPermissionModeChange={handlePermissionModeChange}
-                gitBranch={gitBranch}
-                projectPath={currentSession?.projectPath}
-                onBranchChange={setGitBranch}
-                onOpenTerminal={handleOpenTerminal}
-                allowedTools={currentSession?.allowedTools || []}
-                onAllowedToolsChange={handleAllowedToolsChange}
-                hasClaudeSession={!!currentSession?.claudeSessionId}
-                onClearSession={handleClearSession}
-              />
-            </>
+              <div ref={messagesEndRef} />
+            </div>
           )}
+
+          {/* Task Board (above input) */}
+          <TaskBoard sessionId={currentSessionId} />
+
+          {/* Input — always mounted outside the viewer/messages toggle so draft text is preserved */}
+          <InputArea
+            onSend={handleSend}
+            onStop={handleStop}
+            isStreaming={isStreaming}
+            disabled={!claudeAvailable}
+            model={currentSession?.model || ""}
+            models={settings.models}
+            permissionMode={currentSession?.permissionMode || ""}
+            onModelChange={handleModelChange}
+            onPermissionModeChange={handlePermissionModeChange}
+            gitBranch={gitBranch}
+            projectPath={currentSession?.projectPath}
+            onBranchChange={setGitBranch}
+            onOpenTerminal={handleOpenTerminal}
+            allowedTools={currentSession?.allowedTools || []}
+            onAllowedToolsChange={handleAllowedToolsChange}
+            hasClaudeSession={!!currentSession?.claudeSessionId}
+            onClearSession={handleClearSession}
+          />
         </div>
 
         {/* File panel — tree only, viewer is shown in the chat area */}
@@ -812,10 +957,9 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             <FileTree rootPath={currentSession.projectPath} changedFiles={changedFiles} refreshKey={fileTreeRefreshKey} onFileSelect={(path) => {
               const existing = openFiles.indexOf(path);
               if (existing >= 0) {
-                setActiveFileIndex(existing);
+                updateViewerState({ activeIndex: existing, minimized: false });
               } else {
-                setOpenFiles((prev) => [...prev, path]);
-                setActiveFileIndex(openFiles.length);
+                updateViewerState({ files: [...openFiles, path], activeIndex: openFiles.length, minimized: false });
               }
             }} />
           </div>
