@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch,
-  Wrench, Check, Paperclip, X, FileCode2, FileText,
+  Wrench, Check, Plus, X, FileCode2, FileText,
   Image, FileType, Terminal, Globe, Settings2, Cpu, Shield, Eraser,
   Loader2, SquareTerminal,
 } from "lucide-react";
@@ -627,12 +627,12 @@ export default function InputArea({
             <button
               onClick={handleAttach}
               disabled={disabled}
-              className="flex items-center justify-center p-1.5 rounded-lg flex-shrink-0
+              className="flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0
                          text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50 transition-colors
                          disabled:opacity-30 disabled:cursor-not-allowed"
               title={t("input.attach")}
             >
-              <Paperclip size={14} />
+              <Plus size={13} strokeWidth={2.5} />
             </button>
 
             {/* Inline toolbar */}

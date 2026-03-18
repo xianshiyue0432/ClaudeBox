@@ -3,7 +3,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTaskStore } from "../../stores/taskStore";
 import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles } from "../../lib/claude-ipc";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
 import MessageBubble from "./MessageBubble";
@@ -428,10 +428,21 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     [currentSessionId]
   );
 
-  const toggleFilePanel = useCallback(() => {
+  const FILE_PANEL_WIDTH = 256; // w-64，CSS 逻辑像素
+
+  const toggleFilePanel = useCallback(async () => {
     const next = !showFilePanel;
     setShowFilePanel(next);
     if (!next) { updateViewerState({ files: [], activeIndex: 0, minimized: false }); }
+    try {
+      const win = getCurrentWindow();
+      const [size, scale] = await Promise.all([win.outerSize(), win.scaleFactor()]);
+      // 用 scaleFactor 将逻辑像素转换为物理像素，避免 Retina 屏扩展不足
+      const delta = Math.round(FILE_PANEL_WIDTH * scale);
+      await win.setSize(new PhysicalSize(size.width + (next ? delta : -delta), size.height));
+    } catch {
+      // dev 环境 window API 不可用时忽略
+    }
   }, [showFilePanel, updateViewerState]);
 
   // 切换 session 时重置可见轮次
@@ -711,7 +722,10 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       const m = currentMessages[i];
       if (m.role === "user") break;
       if (m.role === "assistant" && m.usage) {
-        tokens += m.usage.input_tokens + m.usage.output_tokens;
+        tokens += (m.usage.input_tokens || 0)
+          + (m.usage.output_tokens || 0)
+          + (m.usage.cache_creation_input_tokens || 0)
+          + (m.usage.cache_read_input_tokens || 0);
       }
     }
     return tokens;
@@ -846,7 +860,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                   <div className="text-center pb-3">
                     <button
                       onClick={loadMoreTurns}
-                      className="text-xs text-text-muted/60 hover:text-text-muted transition-colors px-3 py-1 rounded-full hover:bg-bg-tertiary/30"
+                      className="text-sm font-semibold text-text-muted/60 hover:text-text-muted transition-colors px-3 py-1 rounded-full hover:bg-bg-tertiary/30"
                     >
                       ↑ 查看更早的对话
                     </button>

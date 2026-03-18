@@ -467,6 +467,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ? {
                   input_tokens: event.message.usage.input_tokens,
                   output_tokens: event.message.usage.output_tokens,
+                  cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
+                  cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
                 }
               : existing.usage,
           };
@@ -483,6 +485,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
               ? {
                   input_tokens: event.message.usage.input_tokens,
                   output_tokens: event.message.usage.output_tokens,
+                  cache_creation_input_tokens: event.message.usage.cache_creation_input_tokens,
+                  cache_read_input_tokens: event.message.usage.cache_read_input_tokens,
                 }
               : undefined,
           });
@@ -517,7 +521,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (msgs[i].role === "assistant") {
             if (lastAssistantIdx === -1) lastAssistantIdx = i;
             if (msgs[i].usage) {
-              turnTokens += (msgs[i].usage!.input_tokens || 0) + (msgs[i].usage!.output_tokens || 0);
+              turnTokens += (msgs[i].usage!.input_tokens || 0)
+                + (msgs[i].usage!.output_tokens || 0)
+                + (msgs[i].usage!.cache_creation_input_tokens || 0)
+                + (msgs[i].usage!.cache_read_input_tokens || 0);
             }
           }
         }

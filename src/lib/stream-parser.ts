@@ -82,6 +82,8 @@ export interface ChatMessage {
   usage?: {
     input_tokens: number;
     output_tokens: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
   };
   isStreaming?: boolean;
   /** Track the original stream message id so we can append content blocks for the same turn */
