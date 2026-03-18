@@ -1,6 +1,6 @@
 import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import remarkGfmSafe from "../../lib/remark-gfm-safe";
 import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 import CodeBlock from "./CodeBlock";
 import ToolCallCard, { shortPath } from "./ToolCallCard";
@@ -10,11 +10,9 @@ import { User, Loader2, Brain, ChevronDown, ChevronRight, Info, FileCode2, FileT
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import type { ComponentPropsWithoutRef } from "react";
 
-// remark-gfm uses lookbehind regex + Unicode property escapes which are unsupported
-// on macOS 12 and earlier (WebKit < 16.4). Detect support once and fall back gracefully.
-let supportsLookbehind = false;
-try { new RegExp("(?<=a)b"); supportsLookbehind = true; } catch { /* old WebKit */ }
-const remarkPlugins = supportsLookbehind ? [remarkGfm] : [];
+// remarkGfmSafe: tables / strikethrough / task-lists without autolink-literal
+// (autolink-literal uses lookbehind regex unsupported on macOS ≤ 12 / WebKit < 16.4)
+const remarkPlugins = [remarkGfmSafe];
 
 // ── File category styling (shared with InputArea) ──────────────────
 

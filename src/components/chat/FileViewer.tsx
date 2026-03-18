@@ -1,17 +1,14 @@
 import { useState, useEffect, useRef, useCallback, memo } from "react";
 import { X, Copy, Check, Loader2, Code2, Eye } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import remarkGfmSafe from "../../lib/remark-gfm-safe";
 import { readFile, readImageBase64 } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 import CodeBlock from "./CodeBlock";
 import hljs from "highlight.js";
 import type { ComponentPropsWithoutRef } from "react";
 
-// Same lookbehind guard as MessageBubble
-let supportsLookbehind = false;
-try { new RegExp("(?<=a)b"); supportsLookbehind = true; } catch { /* old WebKit */ }
-const remarkPlugins = supportsLookbehind ? [remarkGfm] : [];
+const remarkPlugins = [remarkGfmSafe];
 
 // ── Types ────────────────────────────────────────────────────────────
 
