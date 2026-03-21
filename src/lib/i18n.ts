@@ -120,6 +120,11 @@ const en: TranslationDict = {
   "viewer.loading": "Loading...",
   "viewer.source": "Source",
   "viewer.preview": "Preview",
+  "viewer.edit": "Edit",
+  "viewer.view": "View",
+  "viewer.save": "Save",
+  "viewer.unsaved": "Unsaved changes",
+  "viewer.gitChanged": "Uncommitted changes",
 
   // DebugPanel
   "debug.title": "Debug Console",
@@ -296,6 +301,11 @@ const zh: TranslationDict = {
   "viewer.loading": "加载中...",
   "viewer.source": "源码",
   "viewer.preview": "预览",
+  "viewer.edit": "编辑",
+  "viewer.view": "查看",
+  "viewer.save": "保存",
+  "viewer.unsaved": "未保存的更改",
+  "viewer.gitChanged": "未提交的更改",
 
   // DebugPanel
   "debug.title": "调试控制台",

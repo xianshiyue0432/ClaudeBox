@@ -172,6 +172,11 @@ export async function readFile(path: string): Promise<string> {
   return invoke("read_file", { path });
 }
 
+/** Write text content to a file */
+export async function writeFile(path: string, content: string): Promise<void> {
+  return invoke("write_file", { path, content });
+}
+
 /** Read an image file as a data: URL (base64) */
 export async function readImageBase64(path: string): Promise<string> {
   return invoke("read_image_base64", { path });

@@ -823,6 +823,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             <FileViewer
               files={openFiles}
               activeIndex={activeFileIndex}
+              changedFiles={changedFiles}
               onSelectTab={(i) => updateViewerState({ activeIndex: i })}
               onCloseTab={(index) => {
                 const next = openFiles.filter((_, i) => i !== index);

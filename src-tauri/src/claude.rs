@@ -1238,6 +1238,11 @@ pub fn list_dir(path: String) -> Result<Vec<DirEntry>, String> {
 }
 
 #[tauri::command]
+pub fn write_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn read_file(path: String) -> Result<String, String> {
     let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
     // Limit to 2MB to avoid memory issues

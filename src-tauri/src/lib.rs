@@ -43,6 +43,7 @@ pub fn run() {
             claude::git_diff,
             claude::list_dir,
             claude::read_file,
+            claude::write_file,
             claude::read_image_base64,
             claude::save_clipboard_image,
             claude::storage_read,

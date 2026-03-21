@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useCallback, memo } from "react";
-import { X, Copy, Check, Loader2, Code2, Eye, Minus } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, memo, useMemo } from "react";
+import { X, Copy, Check, Loader2, Code2, Eye, Minus, Save } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfmSafe from "../../lib/remark-gfm-safe";
-import { readFile, readImageBase64 } from "../../lib/claude-ipc";
+import { readFile, readImageBase64, writeFile } from "../../lib/claude-ipc";
 import { useT } from "../../lib/i18n";
 import CodeBlock from "./CodeBlock";
 import hljs from "highlight.js";
@@ -15,6 +15,7 @@ const remarkPlugins = [remarkGfmSafe];
 export interface FileViewerProps {
   files: string[];
   activeIndex: number;
+  changedFiles?: Set<string>;
   onSelectTab: (index: number) => void;
   onCloseTab: (index: number) => void;
   onCloseAll: () => void;
@@ -63,32 +64,160 @@ function getPreviewType(filePath: string): PreviewType {
   return "code";
 }
 
+function isTextFile(filePath: string): boolean {
+  return !IMAGE_EXTS.has(getExt(filePath));
+}
+
+function computeHighlightedHtml(text: string, language: string | undefined): string {
+  if (!text) return "";
+  if (language) {
+    try {
+      return hljs.highlight(text, { language }).value;
+    } catch { /* ignore */ }
+  }
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// ── Editable code area (textarea overlaid on highlighted pre) ─────────
+
+interface EditableCodeAreaProps {
+  editContent: string;
+  lang: string | undefined;
+  onChange: (value: string) => void;
+  onSave?: () => void;
+  lineNumbersRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+function EditableCodeArea({ editContent, lang, onChange, onSave, lineNumbersRef }: EditableCodeAreaProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const preRef = useRef<HTMLPreElement>(null);
+
+  const highlightedHtml = useMemo(
+    () => computeHighlightedHtml(editContent, lang),
+    [editContent, lang]
+  );
+
+  const lines = editContent.split("\n");
+
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange(e.target.value);
+  }, [onChange]);
+
+  const syncScroll = useCallback(() => {
+    if (!textareaRef.current) return;
+    const { scrollTop, scrollLeft } = textareaRef.current;
+    if (preRef.current) {
+      preRef.current.scrollTop = scrollTop;
+      preRef.current.scrollLeft = scrollLeft;
+    }
+    if (lineNumbersRef?.current) {
+      lineNumbersRef.current.scrollTop = scrollTop;
+    }
+  }, [lineNumbersRef]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      e.preventDefault();
+      onSave?.();
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const ta = textareaRef.current!;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const spaces = "  ";
+      const newValue = editContent.substring(0, start) + spaces + editContent.substring(end);
+      onChange(newValue);
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = start + spaces.length;
+          textareaRef.current.selectionEnd = start + spaces.length;
+        }
+      });
+    }
+  }, [editContent, onChange, onSave]);
+
+  return (
+    <div className="flex flex-1 min-h-0 overflow-hidden bg-code-bg">
+      {/* Line numbers */}
+      <div
+        ref={lineNumbersRef}
+        aria-hidden
+        className="flex-shrink-0 text-right py-3 pr-3 pl-3 select-none
+                   text-[0.75rem] leading-[1.6] text-text-muted/60 bg-code-bg
+                   border-r border-border/20 font-mono overflow-hidden"
+      >
+        {lines.map((_, i) => (
+          <div key={i}>{i + 1}</div>
+        ))}
+      </div>
+      {/* Overlay: highlighted pre + transparent textarea (both scroll together) */}
+      <div className="relative flex-1 min-w-0 overflow-hidden">
+        <pre
+          ref={preRef}
+          aria-hidden
+          className="absolute inset-0 py-3 px-3 m-0 pointer-events-none font-mono
+                     text-[0.8rem] leading-[1.6] overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere]"
+        >
+          <code
+            className={lang ? `language-${lang} hljs` : "hljs"}
+            dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+          />
+        </pre>
+        <textarea
+          ref={textareaRef}
+          value={editContent}
+          onChange={handleChange}
+          onScroll={syncScroll}
+          onKeyDown={handleKeyDown}
+          className="absolute inset-0 w-full h-full py-3 px-3 font-mono
+                     text-[0.8rem] leading-[1.6] bg-transparent text-transparent resize-none
+                     border-none outline-none ring-0
+                     whitespace-pre-wrap [overflow-wrap:anywhere] overflow-auto
+                     [caret-color:#e2e8f0]"
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Per-tab content panel (memoized to avoid re-fetching on tab switch) ──
 
 interface TabContentProps {
   filePath: string;
   isActive: boolean;
+  onDirtyChange: (filePath: string, dirty: boolean) => void;
 }
 
-const TabContent = memo(function TabContent({ filePath, isActive }: TabContentProps) {
-  const [content, setContent] = useState<string | null>(null);
+const TabContent = memo(function TabContent({ filePath, isActive, onDirtyChange }: TabContentProps) {
+  const [content, setContent] = useState<string | null>(null); // original from disk
+  const [editContent, setEditContent] = useState<string>("");   // working copy
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showSource, setShowSource] = useState(false);
-  const codeRef = useRef<HTMLElement>(null);
+  const [saving, setSaving] = useState(false);
+  const lineNumbersRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
   const previewType = getPreviewType(filePath);
   const lang = getLang(filePath);
-  const lineCount = content?.split("\n").length ?? 0;
+  const canEdit = isTextFile(filePath);
+  const isDirty = canEdit && content !== null && editContent !== content;
 
-  // Fetch content
+  // Fetch content on mount / path change
   useEffect(() => {
     setContent(null);
+    setEditContent("");
     setImageDataUrl(null);
     setError(null);
     setShowSource(false);
+    onDirtyChange(filePath, false);
 
     if (previewType === "image") {
       readImageBase64(filePath)
@@ -96,35 +225,59 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
         .catch((err) => setError(String(err)));
     } else {
       readFile(filePath)
-        .then(setContent)
+        .then((text) => {
+          setContent(text);
+          setEditContent(text);
+        })
         .catch((err) => setError(String(err)));
     }
-  }, [filePath, previewType]);
+  }, [filePath, previewType]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Syntax highlight for code view
+  // Notify parent whenever dirty state changes
   useEffect(() => {
-    if (codeRef.current && content !== null && lang && (previewType === "code" || showSource)) {
-      try {
-        codeRef.current.removeAttribute("data-highlighted");
-        hljs.highlightElement(codeRef.current);
-      } catch { /* ignore */ }
-    }
-  }, [content, lang, previewType, showSource]);
+    onDirtyChange(filePath, isDirty);
+  }, [isDirty, filePath, onDirtyChange]);
+
+  const handleEditChange = useCallback((value: string) => {
+    setEditContent(value);
+  }, []);
 
   const handleCopy = useCallback(() => {
-    if (content) {
-      navigator.clipboard.writeText(content);
+    const text = content;
+    if (text) {
+      navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
   }, [content]);
 
+  const handleSave = useCallback(async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await writeFile(filePath, editContent);
+      setContent(editContent); // update baseline → isDirty becomes false
+      onDirtyChange(filePath, false);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [filePath, editContent, saving, onDirtyChange]);
+
   if (!isActive) return null;
 
-  // ── Toolbar (right side of header) ──
+  // Source language for md/html/svg source view
+  const sourceLang =
+    previewType === "markdown" ? "markdown"
+    : previewType === "html" ? "html"
+    : previewType === "svg" ? "xml"
+    : lang;
+
+  // ── Toolbar ──
   const toolbar = (
     <div className="flex items-center gap-1 flex-shrink-0">
-      {/* Toggle source / preview for markdown & html */}
+      {/* Source/Preview toggle for md, html, svg */}
       {(previewType === "markdown" || previewType === "html" || previewType === "svg") && content !== null && (
         <button
           onClick={() => setShowSource((v) => !v)}
@@ -135,7 +288,21 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
           <span>{showSource ? t("viewer.preview") : t("viewer.source")}</span>
         </button>
       )}
-      {content !== null && (
+      {/* Save button — only when dirty */}
+      {isDirty && (
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1 px-1.5 py-1 rounded bg-accent/15 text-accent
+                     hover:bg-accent/25 transition-colors text-[11px] disabled:opacity-50"
+          title={t("viewer.save")}
+        >
+          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          <span>{t("viewer.save")}</span>
+        </button>
+      )}
+      {/* Copy */}
+      {content !== null && !isDirty && (
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 px-1.5 py-1 rounded text-text-muted hover:text-text-primary transition-colors"
@@ -147,16 +314,17 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     </div>
   );
 
-  // ── Meta info (below tabs, above content) ──
+  // ── Meta bar ──
+  const lineCount = editContent.split("\n").length;
   const metaBar = (
     <div className="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-code-header/50 flex-shrink-0">
       <div className="flex items-center gap-2 min-w-0">
-        {lang && (
+        {(sourceLang || lang) && (
           <span className="text-[10px] text-text-muted px-1.5 py-0.5 rounded bg-bg-tertiary/50 flex-shrink-0">
-            {lang}
+            {previewType === "code" ? lang : (showSource ? sourceLang : t("viewer.preview"))}
           </span>
         )}
-        {content !== null && previewType === "code" && (
+        {content !== null && (previewType === "code" || showSource) && (
           <span className="text-[10px] text-text-muted/50 flex-shrink-0">
             {lineCount} {t("viewer.lines")}
           </span>
@@ -187,7 +355,7 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     );
   }
 
-  // ── Image preview ──
+  // ── Image ──
   if (previewType === "image" && imageDataUrl) {
     return (
       <>
@@ -204,38 +372,42 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     );
   }
 
-  // ── SVG — preview or source ──
+  // ── SVG: source (editable) or rendered ──
   if (previewType === "svg" && content !== null) {
     return (
       <>
         {metaBar}
         {showSource ? (
-          <div className="flex-1 overflow-auto bg-code-bg">
-            <pre className="p-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
-              <code ref={codeRef} className="language-xml">{content}</code>
-            </pre>
-          </div>
+          <EditableCodeArea
+            editContent={editContent}
+            lang="xml"
+            onChange={handleEditChange}
+            onSave={handleSave}
+            lineNumbersRef={lineNumbersRef}
+          />
         ) : (
           <div
             className="flex-1 overflow-auto bg-code-bg flex items-center justify-center p-4"
-            dangerouslySetInnerHTML={{ __html: content }}
+            dangerouslySetInnerHTML={{ __html: editContent }}
           />
         )}
       </>
     );
   }
 
-  // ── Markdown — rendered or source ──
+  // ── Markdown: source (editable) or rendered ──
   if (previewType === "markdown" && content !== null) {
     return (
       <>
         {metaBar}
         {showSource ? (
-          <div className="flex-1 overflow-auto bg-code-bg">
-            <pre className="p-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
-              <code ref={codeRef} className="language-markdown">{content}</code>
-            </pre>
-          </div>
+          <EditableCodeArea
+            editContent={editContent}
+            lang="markdown"
+            onChange={handleEditChange}
+            onSave={handleSave}
+            lineNumbersRef={lineNumbersRef}
+          />
         ) : (
           <div className="flex-1 overflow-auto bg-code-bg p-4">
             <div className="markdown-body max-w-none prose-invert">
@@ -255,7 +427,7 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
                   pre({ children }) { return <>{children}</>; },
                 }}
               >
-                {content}
+                {editContent}
               </ReactMarkdown>
             </div>
           </div>
@@ -264,21 +436,23 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     );
   }
 
-  // ── HTML — rendered or source ──
+  // ── HTML: source (editable) or rendered ──
   if (previewType === "html" && content !== null) {
     return (
       <>
         {metaBar}
         {showSource ? (
-          <div className="flex-1 overflow-auto bg-code-bg">
-            <pre className="p-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
-              <code ref={codeRef} className="language-html">{content}</code>
-            </pre>
-          </div>
+          <EditableCodeArea
+            editContent={editContent}
+            lang="html"
+            onChange={handleEditChange}
+            onSave={handleSave}
+            lineNumbersRef={lineNumbersRef}
+          />
         ) : (
           <div className="flex-1 overflow-hidden bg-white">
             <iframe
-              srcDoc={content}
+              srcDoc={editContent}
               title={getFileName(filePath)}
               className="w-full h-full border-0"
               sandbox="allow-scripts allow-same-origin"
@@ -289,30 +463,17 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
     );
   }
 
-  // ── Default: code with syntax highlighting ──
-  const lines = content?.split("\n") ?? [];
+  // ── Default: editable code with syntax highlighting ──
   return (
     <>
       {metaBar}
-      <div className="flex-1 overflow-auto bg-code-bg">
-        <div className="flex min-w-0">
-          {/* Line numbers */}
-          <div
-            aria-hidden
-            className="select-none flex-shrink-0 text-right py-3 pr-3 pl-3
-                       text-[0.75rem] leading-[1.6] text-text-muted/30 bg-code-bg
-                       border-r border-border/20 font-mono"
-          >
-            {lines.map((_, i) => (
-              <div key={i}>{i + 1}</div>
-            ))}
-          </div>
-          {/* Code with word wrap */}
-          <pre className="flex-1 py-3 px-3 text-[0.8rem] leading-[1.6] m-0 whitespace-pre-wrap [overflow-wrap:anywhere]">
-            <code ref={codeRef} className={lang ? `language-${lang}` : ""}>{content}</code>
-          </pre>
-        </div>
-      </div>
+      <EditableCodeArea
+        editContent={editContent}
+        lang={lang}
+        onChange={handleEditChange}
+        onSave={handleSave}
+        lineNumbersRef={lineNumbersRef}
+      />
     </>
   );
 });
@@ -322,6 +483,7 @@ const TabContent = memo(function TabContent({ filePath, isActive }: TabContentPr
 export default function FileViewer({
   files,
   activeIndex,
+  changedFiles,
   onSelectTab,
   onCloseTab,
   onCloseAll,
@@ -329,23 +491,54 @@ export default function FileViewer({
 }: FileViewerProps) {
   const t = useT();
   const tabBarRef = useRef<HTMLDivElement>(null);
+  const [dirtyFiles, setDirtyFiles] = useState<Record<string, boolean>>({});
 
-  // Handle mouse wheel on tab bar for horizontal scrolling
+  const handleDirtyChange = useCallback((filePath: string, dirty: boolean) => {
+    setDirtyFiles((prev) => {
+      if (prev[filePath] === dirty) return prev;
+      return { ...prev, [filePath]: dirty };
+    });
+  }, []);
+
+  // Confirm before closing a dirty tab
+  const handleCloseTab = useCallback((index: number) => {
+    const filePath = files[index];
+    if (dirtyFiles[filePath]) {
+      const name = getFileName(filePath);
+      if (!window.confirm(`"${name}" ${t("viewer.unsaved")}，确定关闭？`)) return;
+    }
+    // Clean up dirty state
+    setDirtyFiles((prev) => {
+      const next = { ...prev };
+      delete next[files[index]];
+      return next;
+    });
+    onCloseTab(index);
+  }, [files, dirtyFiles, t, onCloseTab]);
+
+  const handleCloseAll = useCallback(() => {
+    const hasDirty = files.some((f) => dirtyFiles[f]);
+    if (hasDirty) {
+      if (!window.confirm(t("viewer.unsaved") + " — 确定关闭全部？")) return;
+    }
+    setDirtyFiles({});
+    onCloseAll();
+  }, [files, dirtyFiles, t, onCloseAll]);
+
   const handleWheel = useCallback((e: React.WheelEvent) => {
     if (tabBarRef.current) {
       tabBarRef.current.scrollLeft += e.deltaY;
     }
   }, []);
 
-  // Close tab via middle-click
   const handleTabMouseDown = useCallback(
     (e: React.MouseEvent, index: number) => {
       if (e.button === 1) {
         e.preventDefault();
-        onCloseTab(index);
+        handleCloseTab(index);
       }
     },
-    [onCloseTab]
+    [handleCloseTab]
   );
 
   const activeFile = files[activeIndex];
@@ -363,6 +556,8 @@ export default function FileViewer({
           {files.map((filePath, i) => {
             const name = getFileName(filePath);
             const isActive = i === activeIndex;
+            const isDirty = dirtyFiles[filePath] === true;
+            const isGitChanged = changedFiles?.has(filePath) === true;
             return (
               <div
                 key={filePath}
@@ -377,8 +572,22 @@ export default function FileViewer({
                 title={filePath}
               >
                 <span className="text-xs truncate select-none">{name}</span>
+                {/* Unsaved dot (amber) */}
+                {isDirty && (
+                  <span
+                    className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-amber-400"
+                    title={t("viewer.unsaved")}
+                  />
+                )}
+                {/* Git-changed dot (emerald) — only when no unsaved changes */}
+                {!isDirty && isGitChanged && (
+                  <span
+                    className="flex-shrink-0 w-1.5 h-1.5 rounded-full bg-emerald-400"
+                    title={t("viewer.gitChanged")}
+                  />
+                )}
                 <button
-                  onClick={(e) => { e.stopPropagation(); onCloseTab(i); }}
+                  onClick={(e) => { e.stopPropagation(); handleCloseTab(i); }}
                   className="flex-shrink-0 p-0.5 rounded hover:bg-bg-tertiary/50 opacity-0 group-hover:opacity-100
                              transition-opacity text-text-muted hover:text-text-primary"
                 >
@@ -396,7 +605,7 @@ export default function FileViewer({
           <Minus size={14} />
         </button>
         <button
-          onClick={onCloseAll}
+          onClick={handleCloseAll}
           className="flex-shrink-0 p-1.5 mr-1 rounded hover:bg-bg-tertiary/50 text-text-muted hover:text-text-primary transition-colors"
           title={t("viewer.closeAll")}
         >
@@ -406,7 +615,12 @@ export default function FileViewer({
 
       {/* Active tab content */}
       {files.map((filePath, i) => (
-        <TabContent key={filePath} filePath={filePath} isActive={i === activeIndex} />
+        <TabContent
+          key={filePath}
+          filePath={filePath}
+          isActive={i === activeIndex}
+          onDirtyChange={handleDirtyChange}
+        />
       ))}
     </div>
   );
