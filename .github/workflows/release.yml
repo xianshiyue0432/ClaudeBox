@@ -128,16 +128,25 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           mkdir -p /tmp/assets
 
-          # Download DMGs (retry up to 3 times — draft assets may take a moment)
-          for arch in aarch64 x64; do
-            for i in 1 2 3; do
-              gh release download "$TAG" \
-                --repo braverior/ClaudeBox \
-                --pattern "ClaudeBox_${VERSION}_${arch}.dmg" \
-                --dir /tmp/assets 2>/dev/null && break
-              sleep 15
+          # Find the release (including drafts) by tag via API
+          RELEASE_ID=$(gh api repos/braverior/ClaudeBox/releases \
+            --jq ".[] | select(.tag_name==\"${TAG}\") | .id" | head -1)
+          echo "Release ID: ${RELEASE_ID:-NOT FOUND}"
+
+          # Download DMGs via API (works for draft releases)
+          if [ -n "$RELEASE_ID" ]; then
+            for arch in aarch64 x64; do
+              ASSET_URL=$(gh api "repos/braverior/ClaudeBox/releases/${RELEASE_ID}/assets" \
+                --jq ".[] | select(.name==\"ClaudeBox_${VERSION}_${arch}.dmg\") | .url")
+              if [ -n "$ASSET_URL" ]; then
+                echo "Downloading ClaudeBox_${VERSION}_${arch}.dmg ..."
+                gh api "$ASSET_URL" -H "Accept: application/octet-stream" \
+                  > "/tmp/assets/ClaudeBox_${VERSION}_${arch}.dmg"
+              else
+                echo "Asset ClaudeBox_${VERSION}_${arch}.dmg not found in release"
+              fi
             done
-          done
+          fi
 
           # Compute SHA256
           SHA_ARM=""; SHA_X64=""
