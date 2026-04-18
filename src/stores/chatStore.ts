@@ -540,10 +540,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 (b) => b.type === "tool_use" && b.id === block.tool_use_id
               );
               if (hasToolUse) {
-                msgs[i] = {
-                  ...msg,
+                const updates: Partial<ChatMessage> = {
                   content: [...msg.content, block],
                 };
+                const isAgent = msg.content.some(
+                  (b) => b.type === "tool_use" && b.id === block.tool_use_id && b.name === "Agent"
+                );
+                if (isAgent) {
+                  let childCount = 0;
+                  for (let k = i + 1; k < msgs.length; k++) {
+                    if (msgs[k].role === "user") break;
+                    childCount++;
+                  }
+                  updates.agentChildCount = childCount;
+                }
+                msgs[i] = { ...msg, ...updates };
                 break;
               }
             }

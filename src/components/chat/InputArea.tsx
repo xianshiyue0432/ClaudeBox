@@ -809,7 +809,9 @@ export default function InputArea({
 
             {/* Inline toolbar */}
             {onModelChange && (
-              <div className="flex items-center gap-0.5 min-w-0 flex-wrap">
+              <div className={`flex items-center gap-0.5 min-w-0 flex-wrap transition-opacity ${
+                isStreaming ? "pointer-events-none opacity-40" : ""
+              }`}>
                 {/* New session button */}
                 {onClearSession && (
                   <>

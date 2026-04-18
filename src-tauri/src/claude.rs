@@ -614,6 +614,8 @@ pub struct SendMessageRequest {
     pub attachments: Option<Vec<Attachment>>,
     /// Claude session ID for --resume (persisted across app restarts by frontend)
     pub resume_id: Option<String>,
+    /// UI locale — forwarded to sidecar for language-aware system prompt
+    pub locale: Option<String>,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -911,6 +913,7 @@ pub async fn send_message(
         "allowedTools": request.allowed_tools.as_deref().unwrap_or(&[]),
         "permissionMode": request.permission_mode.as_deref().unwrap_or(""),
         "attachments": request.attachments.as_deref().unwrap_or(&[]),
+        "locale": request.locale.as_deref().unwrap_or(""),
     });
 
     emit_debug(&app, &session_id, "process", &format!("$ node {} (start: prompt=\"{}\")",

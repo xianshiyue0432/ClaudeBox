@@ -447,6 +447,7 @@ async function main() {
     allowedTools,
     permissionMode,
     attachments,
+    locale,
   } = startMsg;
 
   // Log config for diagnostics (to stderr, which Rust captures)
@@ -490,10 +491,20 @@ async function main() {
   // Workspace boundary — prevent Claude from writing outside the project
   if (cwd) {
     const root = cwd.replace(/\/+$/, "");
+    let appendText = `\n## Workspace Boundary (CRITICAL)\nProject root: ${root}\nALL file operations and Bash commands MUST stay within \`${root}/\`. NEVER create/modify files outside it. NEVER invent non-existent directories — verify with ls/Glob first. When unsure, ask the user.`;
+
+    // Language instruction based on UI locale
+    const LOCALE_INSTRUCTIONS = {
+      zh: "\n\n## Language\nAlways respond in Chinese (简体中文). All explanations, comments in responses, and conversational text must be in Chinese. Code, file paths, and technical identifiers remain in their original language.",
+    };
+    if (locale && LOCALE_INSTRUCTIONS[locale]) {
+      appendText += LOCALE_INSTRUCTIONS[locale];
+    }
+
     options.systemPrompt = {
       type: "preset",
       preset: "claude_code",
-      append: `\n## Workspace Boundary (CRITICAL)\nProject root: ${root}\nALL file operations and Bash commands MUST stay within \`${root}/\`. NEVER create/modify files outside it. NEVER invent non-existent directories — verify with ls/Glob first. When unsure, ask the user.`,
+      append: appendText,
     };
   }
 

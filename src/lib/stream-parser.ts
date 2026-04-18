@@ -93,6 +93,8 @@ export interface ChatMessage {
   streamMessageId?: string;
   /** Attachment metadata for user messages */
   attachments?: { name: string; type: string; path?: string; dataUrl?: string }[];
+  /** Number of child messages belonging to an Agent tool run (set when Agent tool_result arrives) */
+  agentChildCount?: number;
   /** Per-turn metadata, stored on the last assistant message when the turn completes */
   turnMeta?: {
     tokens: number;

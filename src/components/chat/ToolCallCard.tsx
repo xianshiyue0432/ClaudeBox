@@ -165,16 +165,31 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
 
   /** Accumulated answers for multi-question AskUserQuestion */
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [multiAnswers, setMultiAnswers] = useState<Record<string, string[]>>({});
 
   const handleSelectAnswer = (questionText: string, answer: string) => {
     setAnswers((prev) => ({ ...prev, [questionText]: answer }));
     setCustomInputs((prev) => ({ ...prev, [questionText]: "" }));
   };
 
+  const handleToggleAnswer = (questionText: string, label: string) => {
+    setMultiAnswers((prev) => {
+      const current = prev[questionText] || [];
+      const next = current.includes(label)
+        ? current.filter((l) => l !== label)
+        : [...current, label];
+      return { ...prev, [questionText]: next };
+    });
+    setCustomInputs((prev) => ({ ...prev, [questionText]: "" }));
+  };
+
   const handleSubmitAnswers = () => {
     if (!onRespond || !pendingInteraction || !block.id) return;
-    // Merge: prefer custom text input over option selection when custom text is non-empty
     const finalAnswers: Record<string, string> = { ...answers };
+    // Merge multiSelect answers as comma-separated strings
+    for (const [q, labels] of Object.entries(multiAnswers)) {
+      if (labels.length > 0) finalAnswers[q] = labels.join(", ");
+    }
     for (const [q, text] of Object.entries(customInputs)) {
       if (text.trim()) finalAnswers[q] = text.trim();
     }
@@ -241,6 +256,8 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
   if (isAskUser && pendingInteraction?.questions) {
     const questions = pendingInteraction.questions;
     const isSingleQuestion = questions.length === 1;
+    const hasMultiSelect = questions.some((q) => q.multiSelect);
+    const canQuickSubmit = isSingleQuestion && !hasMultiSelect;
 
     return (
       <div className="rounded-lg border-2 border-accent/50 bg-accent/5 overflow-hidden">
@@ -259,15 +276,21 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
               )}
               <div className="flex flex-wrap gap-2 mb-2">
                 {q.options.map((opt, oi) => {
-                  const isSelected = answers[q.question] === opt.label;
+                  const isSelected = q.multiSelect
+                    ? (multiAnswers[q.question] || []).includes(opt.label)
+                    : answers[q.question] === opt.label;
                   return (
                     <button
                       key={oi}
-                      onClick={() =>
-                        isSingleQuestion
-                          ? handleQuickAnswer(q.question, opt.label)
-                          : handleSelectAnswer(q.question, opt.label)
-                      }
+                      onClick={() => {
+                        if (q.multiSelect) {
+                          handleToggleAnswer(q.question, opt.label);
+                        } else if (canQuickSubmit) {
+                          handleQuickAnswer(q.question, opt.label);
+                        } else {
+                          handleSelectAnswer(q.question, opt.label);
+                        }
+                      }}
                       className={`px-3 py-1.5 text-sm rounded-lg border text-text-primary
                                  transition-colors text-left ${
                                    isSelected
@@ -296,11 +319,14 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                     setCustomInputs({ ...customInputs, [q.question]: e.target.value });
                     if (e.target.value.trim()) {
                       setAnswers((prev) => { const next = { ...prev }; delete next[q.question]; return next; });
+                      if (q.multiSelect) {
+                        setMultiAnswers((prev) => { const next = { ...prev }; delete next[q.question]; return next; });
+                      }
                     }
                   }}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && customInputs[q.question]?.trim()) {
-                      if (isSingleQuestion) {
+                      if (canQuickSubmit) {
                         handleQuickAnswer(q.question, customInputs[q.question].trim());
                       } else {
                         handleSelectAnswer(q.question, customInputs[q.question].trim());
@@ -311,7 +337,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                              bg-bg-primary text-text-primary placeholder:text-text-muted
                              focus:outline-none focus:border-accent/50"
                 />
-                {isSingleQuestion && (
+                {canQuickSubmit && (
                   <button
                     onClick={() => {
                       if (customInputs[q.question]?.trim()) {
@@ -329,10 +355,12 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
               </div>
             </div>
           ))}
-          {/* Submit All button for multi-question */}
-          {!isSingleQuestion && (() => {
+          {/* Submit button — shown for multi-question OR single multiSelect */}
+          {!canQuickSubmit && (() => {
             const answeredCount = questions.filter(
-              (q) => answers[q.question] || customInputs[q.question]?.trim()
+              (q) => q.multiSelect
+                ? (multiAnswers[q.question] || []).length > 0
+                : answers[q.question] || customInputs[q.question]?.trim()
             ).length;
             return (
               <button
@@ -369,9 +397,8 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
           {planContent && (
             <div className="mb-3">
               <div className="text-xs text-text-muted mb-1">{t("tool.plan")}</div>
-              <div className="text-sm bg-code-bg rounded p-3 max-h-64 overflow-y-auto prose prose-sm prose-invert max-w-none
-                              prose-headings:text-text-primary prose-p:text-text-secondary prose-li:text-text-secondary
-                              prose-strong:text-text-primary prose-code:text-accent prose-code:bg-transparent">
+              <div className="text-sm bg-code-bg rounded p-3 max-h-[60vh] overflow-y-auto">
+                <div className="markdown-body">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfmSafe]}
                   components={{
@@ -384,6 +411,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                     ),
                   }}
                 >{planContent}</ReactMarkdown>
+                </div>
               </div>
             </div>
           )}
@@ -442,9 +470,8 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
         </button>
         {planExpanded && (
           <div className="px-3 pb-3 border-t border-border">
-            <div className="text-sm bg-code-bg rounded p-3 mt-2 max-h-96 overflow-y-auto prose prose-sm prose-invert max-w-none
-                            prose-headings:text-text-primary prose-p:text-text-secondary prose-li:text-text-secondary
-                            prose-strong:text-text-primary prose-code:text-accent prose-code:bg-transparent">
+            <div className="text-sm bg-code-bg rounded p-3 mt-2 max-h-[60vh] overflow-y-auto">
+              <div className="markdown-body">
               <ReactMarkdown
                 remarkPlugins={[remarkGfmSafe]}
                 components={{
@@ -457,6 +484,7 @@ export default function ToolCallCard({ block, result, pendingInteraction, onResp
                   ),
                 }}
               >{savedPlanContent}</ReactMarkdown>
+              </div>
             </div>
           </div>
         )}

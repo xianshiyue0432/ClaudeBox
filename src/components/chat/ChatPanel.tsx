@@ -55,14 +55,16 @@ function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hi
     );
 
     // Collect sub-agent assistant messages as children.
-    // When the Agent is done (hasResult), stop at messages that have no tool_use blocks
-    // — those are the parent's continuation text, not sub-agent work.
+    // When the Agent is done (hasResult), use the recorded child count to avoid
+    // absorbing the parent's continuation messages as sub-agent children.
     const childIndices: number[] = [];
+    const maxChildren = hasResult ? (msg.agentChildCount ?? Infinity) : Infinity;
     for (let j = i + 1; j < msgs.length; j++) {
       const child = msgs[j];
       if (child.role === "user") break;
+      if (childIndices.length >= maxChildren) break;
 
-      if (hasResult) {
+      if (hasResult && maxChildren === Infinity) {
         const INTERACTIVE_TOOLS = new Set(["ExitPlanMode", "AskUserQuestion"]);
         const toolUseBlocks = child.content.filter((b) => b.type === "tool_use");
         const childHasToolUse = toolUseBlocks.length > 0;
@@ -590,6 +592,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             type: a.type,
           })),
           resume_id: resumeId,
+          locale: settings.locale || undefined,
         });
         addLaunchMessage(currentSessionId, pid, resumeId);
         // Sync activity to Lark bot if connected

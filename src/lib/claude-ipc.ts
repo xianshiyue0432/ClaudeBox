@@ -15,6 +15,8 @@ export interface SendMessageRequest {
   attachments?: { path: string; name: string; type: string }[];
   /** Claude session ID for --resume (persisted across app restarts) */
   resume_id?: string;
+  /** UI locale — used to instruct Claude to respond in the matching language */
+  locale?: string;
 }
 
 /** Send a message (spawns claude -p per message, with --resume for multi-turn). Returns PID. */
