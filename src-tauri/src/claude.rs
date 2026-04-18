@@ -383,6 +383,15 @@ pub fn command_with_path(program: &str) -> Command {
     }
     cmd.env_remove("CLAUDECODE");
 
+    // On Windows, always use the latest process Path (may have been updated by
+    // check_node_version after a fresh Node.js install).
+    #[cfg(windows)]
+    {
+        if let Ok(path) = std::env::var("Path") {
+            cmd.env("Path", path);
+        }
+    }
+
     // Inject proxy env vars for child processes (Node.js sidecar).
     // Node.js/undici supports HTTP CONNECT proxy via HTTP_PROXY/HTTPS_PROXY.
     // Also set ALL_PROXY to SOCKS5 as fallback.
@@ -676,6 +685,60 @@ pub async fn check_claude_installed(claude_path: Option<String>) -> Result<Strin
     }
 }
 
+/// On Windows, read the current PATH from the registry (system + user)
+/// so we can find programs installed after ClaudeBox launched.
+#[cfg(windows)]
+fn fresh_windows_path() -> Option<String> {
+    let read_reg = |key: &str| -> Option<String> {
+        let output = Command::new("reg")
+            .args(["query", key, "/v", "Path"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output()
+            .ok()?;
+        let text = decode_os_output(&output.stdout);
+        // reg output format: "    Path    REG_SZ    <value>" or "    Path    REG_EXPAND_SZ    <value>"
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("Path") || trimmed.starts_with("PATH") {
+                // Split on REG_SZ or REG_EXPAND_SZ
+                if let Some(pos) = trimmed.find("REG_") {
+                    let after = &trimmed[pos..];
+                    if let Some(val_start) = after.find("    ") {
+                        return Some(after[val_start..].trim().to_string());
+                    }
+                }
+            }
+        }
+        None
+    };
+    let sys = read_reg(r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment").unwrap_or_default();
+    let user = read_reg(r"HKCU\Environment").unwrap_or_default();
+    if sys.is_empty() && user.is_empty() {
+        return None;
+    }
+    Some(format!("{};{}", sys, user))
+}
+
+/// Try running `node --version` with a custom PATH (used as fallback on Windows
+/// after Node.js is freshly installed and the process PATH is stale).
+#[cfg(windows)]
+fn check_node_with_path(path: &str) -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let output = Command::new("cmd")
+        .args(["/C", "node", "--version"])
+        .env("Path", path)
+        .creation_flags(0x0800_0000)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
 /// Check Node.js version. Returns the version string (e.g. "v22.3.0") on success.
 #[tauri::command]
 pub async fn check_node_version() -> Result<String, String> {
@@ -685,12 +748,36 @@ pub async fn check_node_version() -> Result<String, String> {
     });
     match rx.recv_timeout(std::time::Duration::from_secs(5)) {
         Ok(Ok(output)) if output.status.success() => {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
         }
-        Ok(Ok(output)) => Err(decode_os_output(&output.stderr).trim().to_string()),
-        Ok(Err(e)) => Err(format!("node not found: {}", e)),
-        Err(_) => Err("node version check timed out".to_string()),
+        _ => {}
     }
+
+    // On Windows, retry with fresh PATH from registry (Node may have been
+    // installed after ClaudeBox launched, so the cached process PATH is stale).
+    #[cfg(windows)]
+    {
+        if let Some(fresh_path) = fresh_windows_path() {
+            if let Some(ver) = check_node_with_path(&fresh_path) {
+                // Update the process PATH so future calls (npm, claude) also work
+                std::env::set_var("Path", &fresh_path);
+                return Ok(ver);
+            }
+        }
+        // Also try the default Node.js install location directly
+        let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let node_dir = format!(r"{}\nodejs", program_files);
+        if std::path::Path::new(&node_dir).join("node.exe").exists() {
+            let current = std::env::var("Path").unwrap_or_default();
+            let new_path = format!("{};{}", current, node_dir);
+            if let Some(ver) = check_node_with_path(&new_path) {
+                std::env::set_var("Path", &new_path);
+                return Ok(ver);
+            }
+        }
+    }
+
+    Err("node not found".to_string())
 }
 
 /// Check whether a model ID is available by making a minimal API call.
@@ -1369,7 +1456,7 @@ pub fn read_image_base64(path: String) -> Result<String, String> {
 
 // ── One-click install: Node.js + Claude Code ────────────────────────
 
-const NODE_LTS_VERSION: &str = "v22.16.0";
+const NODE_LTS_VERSION: &str = "v24.15.0";
 
 #[derive(Clone, Serialize)]
 pub struct NodeInstallerInfo {

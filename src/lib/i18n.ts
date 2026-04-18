@@ -62,6 +62,7 @@ const en: TranslationDict = {
 
   // SettingsDialog
   "settings.title": "Settings",
+  "settings.nodeStatus": "Node.js Status",
   "settings.cliStatus": "Claude CLI Status",
   "settings.checking": "Checking...",
   "settings.notFound": "Not found",
@@ -216,6 +217,10 @@ const en: TranslationDict = {
   "install.failed": "Installation failed: {error}",
   "install.nodeOld": "Node.js {version} is too old, need to install Node.js {target}.",
   "install.openUrl": "Download from website",
+  "install.installNode": "Install Node.js",
+  "install.installClaude": "Install Claude Code",
+  "install.needsNode": "Node.js required first",
+  "install.nodeSuccess": "Node.js installed successfully!",
 };
 
 const zh: TranslationDict = {
@@ -278,6 +283,7 @@ const zh: TranslationDict = {
 
   // SettingsDialog
   "settings.title": "设置",
+  "settings.nodeStatus": "Node.js 状态",
   "settings.cliStatus": "Claude CLI 状态",
   "settings.checking": "检查中...",
   "settings.notFound": "未找到",
@@ -432,6 +438,10 @@ const zh: TranslationDict = {
   "install.failed": "安装失败：{error}",
   "install.nodeOld": "Node.js {version} 版本过低，需要安装 Node.js {target}。",
   "install.openUrl": "前往官网下载",
+  "install.installNode": "安装 Node.js",
+  "install.installClaude": "安装 Claude Code",
+  "install.needsNode": "请先安装 Node.js",
+  "install.nodeSuccess": "Node.js 安装成功！",
 };
 
 const dictionaries: Record<string, TranslationDict> = { en, zh };

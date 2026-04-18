@@ -1,40 +1,17 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { X, CheckCircle, XCircle, Loader2, ScrollText, Plus, Trash2, BarChart2, Bot } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
 import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
 import { startLarkBot, stopLarkBot } from "../../lib/lark-ipc";
 import { useT } from "../../lib/i18n";
-import InstallWizard from "./InstallWizard";
+import { NodeStatusSection, ClaudeInstallButton } from "./InstallWizard";
 
 function LarkStatusDot({ status }: { status: LarkStatus }) {
   if (status === "connected") return <span className="inline-block w-2 h-2 rounded-full bg-success" />;
   if (status === "connecting" || status === "reconnecting") return <Loader2 size={10} className="animate-spin text-warning" />;
   if (status === "error") return <span className="inline-block w-2 h-2 rounded-full bg-error" />;
   return <span className="inline-block w-2 h-2 rounded-full bg-text-muted/40" />;
-}
-
-function getInstallInstructions(): { platform: string; command: string; note: string } {
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("mac") || ua.includes("darwin")) {
-    return {
-      platform: "macOS",
-      command: "brew install claude-code",
-      note: "Requires Homebrew. Alternatively: npm install -g @anthropic-ai/claude-code",
-    };
-  } else if (ua.includes("win")) {
-    return {
-      platform: "Windows",
-      command: "npm install -g @anthropic-ai/claude-code",
-      note: "Requires Node.js 22+.",
-    };
-  } else {
-    return {
-      platform: "Linux",
-      command: "npm install -g @anthropic-ai/claude-code",
-      note: "Requires Node.js 22+. Or use: curl -fsSL https://cli.anthropic.com/install.sh | sh",
-    };
-  }
 }
 
 interface SettingsDialogProps {
@@ -193,11 +170,17 @@ export default function SettingsDialog({
   const t = useT();
   const [claudeVersion, setClaudeVersion] = useState<string | null>(null);
   const [claudeError, setClaudeError] = useState<string | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [nodeWarning, setNodeWarning] = useState<string | null>(null);
+  const [claudeChecking, setClaudeChecking] = useState(false);
+  const [nodeVersion, setNodeVersion] = useState<string | null>(null);
+  const [nodeChecking, setNodeChecking] = useState(false);
   const [modelInput, setModelInput] = useState("");
   const [modelChecking, setModelChecking] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+
+  const nodeOk = nodeVersion !== null && (() => {
+    const major = parseInt(nodeVersion.replace(/^v/, "").split(".")[0], 10);
+    return !isNaN(major) && major >= 22;
+  })();
 
   const addModel = async () => {
     const trimmed = modelInput.trim();
@@ -211,14 +194,12 @@ export default function SettingsDialog({
         settings.apiKey || undefined,
         settings.baseUrl || undefined,
       );
-      // Model is valid — add it
       const newModels = [...settings.models, trimmed];
       updateSettings({ models: newModels, model: trimmed });
       setModelInput("");
     } catch (err) {
       const reason = String(err);
       if (reason.includes("no_api_key")) {
-        // No API key — add without validation
         const newModels = [...settings.models, trimmed];
         updateSettings({ models: newModels, model: trimmed });
         setModelInput("");
@@ -231,17 +212,21 @@ export default function SettingsDialog({
     }
   };
 
-  const checkClaude = async () => {
-    setChecking(true);
+  const recheckNode = useCallback(async () => {
+    setNodeChecking(true);
+    try {
+      const ver = await checkNodeVersion();
+      setNodeVersion(ver);
+    } catch {
+      setNodeVersion(null);
+    } finally {
+      setNodeChecking(false);
+    }
+  }, []);
+
+  const recheckClaude = useCallback(async () => {
+    setClaudeChecking(true);
     setClaudeError(null);
-    setNodeWarning(null);
-    // Check Node.js version in parallel
-    checkNodeVersion().then((ver) => {
-      const major = parseInt(ver.replace(/^v/, "").split(".")[0], 10);
-      if (!isNaN(major) && major < 22) {
-        setNodeWarning(ver);
-      }
-    }).catch(() => {});
     try {
       const version = await checkClaudeInstalled(
         settings.claudePath || undefined
@@ -254,12 +239,17 @@ export default function SettingsDialog({
       setClaudeError(String(err));
       onClaudeStatusChange(false);
     } finally {
-      setChecking(false);
+      setClaudeChecking(false);
     }
-  };
+  }, [settings.claudePath, onClaudeStatusChange]);
+
+  const recheckAll = useCallback(() => {
+    recheckNode();
+    recheckClaude();
+  }, [recheckNode, recheckClaude]);
 
   useEffect(() => {
-    if (open) checkClaude();
+    if (open) recheckAll();
   }, [open, settings.claudePath]);
 
   if (!open) return null;
@@ -282,18 +272,22 @@ export default function SettingsDialog({
         </div>
 
         <div className="px-6 py-4 space-y-5">
+          {/* Node.js Status */}
+          <NodeStatusSection
+            nodeVersion={nodeVersion}
+            nodeChecking={nodeChecking}
+            onRecheck={recheckNode}
+          />
+
           {/* Claude CLI Status */}
           <div>
             <label className="text-sm font-medium text-text-primary block mb-2">
               {t("settings.cliStatus")}
             </label>
             <div className="flex items-center gap-2 text-sm">
-              {checking ? (
+              {claudeChecking ? (
                 <>
-                  <Loader2
-                    size={14}
-                    className="animate-spin text-text-muted"
-                  />
+                  <Loader2 size={14} className="animate-spin text-text-muted" />
                   <span className="text-text-muted">{t("settings.checking")}</span>
                 </>
               ) : claudeVersion ? (
@@ -310,37 +304,14 @@ export default function SettingsDialog({
                 </>
               )}
               <button
-                onClick={checkClaude}
+                onClick={recheckClaude}
                 className="ml-auto text-xs text-accent hover:text-accent-hover transition-colors"
               >
                 {t("settings.recheck")}
               </button>
             </div>
-            {/* Install wizard when not found */}
-            {!checking && !claudeVersion && (
-              <InstallWizard
-                onComplete={checkClaude}
-                manualInstructions={getInstallInstructions()}
-              />
-            )}
-            {/* Node.js version warning */}
-            {!checking && nodeWarning && (
-              <div className="mt-2 rounded-lg bg-warning/10 border border-warning/30 px-3 py-2 flex items-start gap-2">
-                <span className="text-warning text-xs mt-0.5">⚠</span>
-                <div className="text-xs text-warning/90">
-                  Node.js {nodeWarning} is too old. Claude Code requires Node.js ≥ 22.
-                  {" "}
-                  <a
-                    href="https://nodejs.org"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline hover:text-warning"
-                    onClick={(e) => { e.preventDefault(); import("../../lib/claude-ipc").then(m => m.openInBrowser("https://nodejs.org")); }}
-                  >
-                    nodejs.org
-                  </a>
-                </div>
-              </div>
+            {!claudeChecking && !claudeVersion && (
+              <ClaudeInstallButton nodeOk={nodeOk} onComplete={recheckClaude} />
             )}
           </div>
 
