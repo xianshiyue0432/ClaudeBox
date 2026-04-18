@@ -1797,7 +1797,10 @@ pub fn storage_remove(key: String) -> Result<(), String> {
 /// from the last assistant message with usage data.
 #[tauri::command]
 pub fn get_context_tokens(session_id: String, project_path: String) -> Option<u64> {
+    #[cfg(unix)]
     let home = std::env::var("HOME").ok()?;
+    #[cfg(windows)]
+    let home = std::env::var("USERPROFILE").ok()?;
     let home = std::path::PathBuf::from(home);
     // Encode project path: replace non-alphanumeric with '-'
     let encoded: String = project_path
