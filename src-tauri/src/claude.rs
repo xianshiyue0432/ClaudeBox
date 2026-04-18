@@ -689,6 +689,7 @@ pub async fn check_claude_installed(claude_path: Option<String>) -> Result<Strin
 /// so we can find programs installed after ClaudeBox launched.
 #[cfg(windows)]
 fn fresh_windows_path() -> Option<String> {
+    use std::os::windows::process::CommandExt;
     let read_reg = |key: &str| -> Option<String> {
         let output = Command::new("reg")
             .args(["query", key, "/v", "Path"])
