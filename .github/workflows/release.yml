@@ -112,7 +112,7 @@ jobs:
     runs-on: macos-latest
     if: ${{ !failure() && !cancelled() }}
     permissions:
-      contents: read
+      contents: write  # needed to read draft releases via API
 
     steps:
       - name: Get version from tag
