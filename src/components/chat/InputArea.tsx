@@ -6,7 +6,7 @@ import {
   Loader2, SquareTerminal, Zap, Search,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch } from "../../lib/claude-ipc";
+import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch, gitDiffFiles } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import { SKILL_CATEGORIES } from "../../lib/skills";
@@ -258,15 +258,20 @@ function BranchDropdown({
   branch,
   projectPath,
   onBranchChange,
+  isStreaming,
+  onStop,
 }: {
   branch: string;
   projectPath: string;
   onBranchChange: (branch: string) => void;
+  isStreaming: boolean;
+  onStop: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingBranch, setPendingBranch] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -296,11 +301,7 @@ function BranchDropdown({
     setOpen(true);
   }, [open, projectPath, branch]);
 
-  const handleSwitch = useCallback(async (target: string) => {
-    if (target === branch) {
-      setOpen(false);
-      return;
-    }
+  const doCheckout = useCallback(async (target: string) => {
     setSwitching(true);
     setError(null);
     try {
@@ -311,8 +312,39 @@ function BranchDropdown({
       setError(String(e));
     } finally {
       setSwitching(false);
+      setPendingBranch(null);
     }
-  }, [branch, projectPath, onBranchChange]);
+  }, [projectPath, onBranchChange]);
+
+  const handleSwitch = useCallback(async (target: string) => {
+    if (target === branch) {
+      setOpen(false);
+      return;
+    }
+    setError(null);
+    try {
+      const dirty = await gitDiffFiles(projectPath);
+      if (dirty.length > 0) {
+        setError(t("branch.dirtyWorktree"));
+        return;
+      }
+    } catch { /* ignore check failure */ }
+    if (isStreaming) {
+      setPendingBranch(target);
+      return;
+    }
+    doCheckout(target);
+  }, [branch, projectPath, isStreaming, doCheckout, t]);
+
+  const handleConfirmStop = useCallback(() => {
+    if (!pendingBranch) return;
+    onStop();
+    doCheckout(pendingBranch);
+  }, [pendingBranch, onStop, doCheckout]);
+
+  const handleCancelPending = useCallback(() => {
+    setPendingBranch(null);
+  }, []);
 
   return (
     <div ref={ref} className="relative">
@@ -332,7 +364,26 @@ function BranchDropdown({
         <span className="truncate max-w-[100px]">{branch}</span>
         <ChevronDown size={10} className="flex-shrink-0 opacity-50" />
       </button>
-      {open && (
+      {pendingBranch && (
+        <div className="absolute bottom-full left-0 mb-1 min-w-[200px] rounded-lg bg-bg-secondary border border-border shadow-xl z-50 p-3">
+          <p className="text-xs text-text-secondary mb-2">{t("branch.stopFirst")}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleConfirmStop}
+              className="px-2 py-1 rounded text-xs bg-accent text-white hover:bg-accent/80 transition-colors"
+            >
+              {t("branch.stopAndSwitch")}
+            </button>
+            <button
+              onClick={handleCancelPending}
+              className="px-2 py-1 rounded text-xs text-text-secondary hover:bg-bg-tertiary/50 transition-colors"
+            >
+              {t("chat.newSession.cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+      {open && !pendingBranch && (
         <div className="absolute bottom-full left-0 mb-1 min-w-[160px] max-w-[260px] max-h-[240px]
                         overflow-y-auto rounded-lg bg-bg-secondary border border-border shadow-xl z-50 py-1">
           {error && (
@@ -809,9 +860,7 @@ export default function InputArea({
 
             {/* Inline toolbar */}
             {onModelChange && (
-              <div className={`flex items-center gap-0.5 min-w-0 flex-wrap transition-opacity ${
-                isStreaming ? "pointer-events-none opacity-40" : ""
-              }`}>
+              <div className="flex items-center gap-0.5 min-w-0 flex-wrap">
                 {/* New session button */}
                 {onClearSession && (
                   <>
@@ -866,6 +915,8 @@ export default function InputArea({
                       branch={gitBranch}
                       projectPath={projectPath}
                       onBranchChange={onBranchChange}
+                      isStreaming={isStreaming}
+                      onStop={onStop}
                     />
                   </>
                 )}

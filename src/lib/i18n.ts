@@ -200,6 +200,9 @@ const en: TranslationDict = {
   // Branch
   "branch.switch": "Switch branch",
   "branch.switchFailed": "Failed to switch branch",
+  "branch.dirtyWorktree": "Please commit or stash changes before switching branch",
+  "branch.stopFirst": "A task is running. Stop it before switching branch?",
+  "branch.stopAndSwitch": "Stop & Switch",
 
   // Terminal
   "input.openTerminal": "Open in Terminal",
@@ -443,6 +446,9 @@ const zh: TranslationDict = {
   // Branch
   "branch.switch": "切换分支",
   "branch.switchFailed": "切换分支失败",
+  "branch.dirtyWorktree": "请先提交或暂存更改后再切换分支",
+  "branch.stopFirst": "任务正在运行中，是否停止后切换分支？",
+  "branch.stopAndSwitch": "停止并切换",
 
   // Terminal
   "input.openTerminal": "在终端中打开",

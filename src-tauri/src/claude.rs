@@ -926,13 +926,12 @@ pub async fn send_message(
     ));
     emit_debug(&app, &session_id, "info", &format!("cwd: {}", request.cwd));
 
-    let mut child = command_with_path("node")
-        .arg(&bridge_path)
+    let mut cmd = command_with_path("node");
+    cmd.arg(&bridge_path)
         .current_dir(&request.cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::piped())
-        // Override API key / base URL from settings if provided
         .envs(
             request.api_key.as_deref()
                 .filter(|s| !s.is_empty())
@@ -945,10 +944,20 @@ pub async fn send_message(
                         .into_iter()
                 )
         )
-        // Ensure CLAUDECODE is never passed to child — prevents
-        // "Cannot be launched inside another Claude Code session" error
-        .env_remove("CLAUDECODE")
-        .spawn()
+        .env_remove("CLAUDECODE");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setpgid(0, 0);
+                Ok(())
+            });
+        }
+    }
+
+    let mut child = cmd.spawn()
         .map_err(|e| {
             let msg = format!("Failed to spawn node sidecar: {}", e);
             emit_debug(&app, &session_id, "error", &msg);
@@ -1121,7 +1130,7 @@ pub fn stop_session(
     if let Some(pid) = pids.remove(&session_id) {
         emit_debug(&app, &session_id, "process", &format!("Killing PID {}", pid));
         #[cfg(unix)]
-        unsafe { libc::kill(pid as i32, libc::SIGTERM); }
+        unsafe { libc::kill(-(pid as i32), libc::SIGTERM); }
         #[cfg(windows)]
         {
             // Windows: use taskkill to terminate the process tree
