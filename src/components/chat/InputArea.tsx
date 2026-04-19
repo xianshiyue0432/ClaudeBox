@@ -11,6 +11,7 @@ import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import { parseSkills } from "../../lib/skills";
 import { useSkillsStore } from "../../stores/skillsStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 
 export interface Attachment {
   path: string;
@@ -105,72 +106,6 @@ const USER_TOOLS = [
   { value: "MCP", label: "MCP" },
 ];
 
-function DropdownSelect({
-  value,
-  options,
-  onChange,
-  icon,
-  tooltip,
-}: {
-  value: string;
-  options: { value: string; label: string }[];
-  onChange: (v: string) => void;
-  icon?: React.ReactNode;
-  tooltip?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const current = options.find((o) => o.value === value) || options[0];
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
-                   text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50
-                   transition-colors"
-        title={tooltip}
-      >
-        {icon}
-        <span className="truncate max-w-[160px]">{current.label}</span>
-        <ChevronDown size={12} className="flex-shrink-0" />
-      </button>
-      {open && (
-        <div className="absolute bottom-full left-0 mb-1 min-w-[120px] max-w-[260px] rounded-lg
-                        bg-bg-secondary border border-border shadow-xl z-50 py-1">
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => {
-                onChange(opt.value);
-                setOpen(false);
-              }}
-              className={`block w-full text-left px-3 py-1.5 text-xs transition-colors truncate
-                ${
-                  opt.value === value
-                    ? "text-accent bg-accent/10"
-                    : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30"
-                }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ToolsSelector({
   selected,
   onChange,
@@ -220,6 +155,7 @@ function ToolsSelector({
       {open && (
         <div className="absolute bottom-full left-0 mb-1 min-w-[150px] rounded-lg
                         bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          <p className="px-3 py-1.5 text-[10px] text-text-muted">{t("input.toolsHint")}</p>
           <button
             onClick={() => onChange(allUserSelected ? selected.filter((t) => !userToolValues.includes(t)) : [...selected.filter((t) => !userToolValues.includes(t)), ...userToolValues])}
             className="block w-full text-left px-3 py-1.5 text-xs text-text-muted
@@ -409,6 +345,94 @@ function BranchDropdown({
               <span className="truncate">{b}</span>
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const EFFORT_LEVELS = ["low", "medium", "high", "max"] as const;
+
+function ModelPanel({
+  model,
+  models,
+  onModelChange,
+}: {
+  model: string;
+  models: string[];
+  onModelChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
+  const effort = useSettingsStore((s) => s.settings.effort) || "high";
+  const updateSettings = useSettingsStore((s) => s.updateSettings);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const shortModel = model ? model.replace(/^claude-/, "").replace(/-\d{8}$/, "") : "";
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 px-2 py-1 rounded-md text-xs
+                   text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/50
+                   transition-colors"
+        title={t("input.model")}
+      >
+        <Cpu size={11} className="flex-shrink-0" />
+        <span className="truncate max-w-[140px]">{shortModel || model || t("input.addModelsHint")}</span>
+        <span className="text-text-muted/60 capitalize">{effort}</span>
+        {open ? <ChevronUp size={12} className="flex-shrink-0" /> : <ChevronDown size={12} className="flex-shrink-0" />}
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 mb-1 w-[240px] rounded-lg
+                        bg-bg-secondary border border-border shadow-xl z-50 py-1">
+          {/* Model list */}
+          {models.length > 0 && (
+            <div className="px-2 pt-1 pb-1.5">
+              <p className="text-[10px] text-text-muted uppercase tracking-wider mb-1 px-1">{t("input.model")}</p>
+              {models.map((m) => (
+                <button
+                  key={m}
+                  onClick={() => { onModelChange(m); }}
+                  className={`block w-full text-left px-2 py-1.5 text-xs rounded-md transition-colors truncate ${
+                    m === model
+                      ? "text-accent bg-accent/10"
+                      : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Effort */}
+          <div className="border-t border-border px-2 pt-1.5 pb-1">
+            <p className="text-[10px] text-text-muted uppercase tracking-wider mb-1 px-1">{t("input.effort")}</p>
+            <div className="flex gap-0.5">
+              {EFFORT_LEVELS.map((level) => (
+                <button
+                  key={level}
+                  onClick={() => { updateSettings({ effort: level }); }}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    level === effort
+                      ? "bg-accent text-white"
+                      : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30"
+                  }`}
+                >
+                  {t(`effort.${level}`)}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -639,6 +663,10 @@ function AttachmentChip({
   );
 }
 
+const CONTEXT_WINDOW_SIZES: Record<string, number> = {
+  "200k": 200_000,
+  "1m": 1_000_000,
+};
 const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 function formatTokenCount(n: number): string {
@@ -647,9 +675,20 @@ function formatTokenCount(n: number): string {
   return String(n);
 }
 
+const CONTEXT_WINDOW_OPTIONS = [
+  { key: "200k" as const, size: 200_000 },
+  { key: "1m" as const, size: 1_000_000 },
+];
+
 function ContextProgressBar({ tokens, contextWindow, label }: { tokens?: number; contextWindow?: number; label: string }) {
   if (!tokens) return null;
-  const windowSize = contextWindow || DEFAULT_CONTEXT_WINDOW;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const t = useT();
+  const contextWindowSetting = useSettingsStore((s) => s.settings.contextWindow);
+  const updateSettings = useSettingsStore((s) => s.updateSettings);
+  const settingSize = CONTEXT_WINDOW_SIZES[contextWindowSetting] || DEFAULT_CONTEXT_WINDOW;
+  const windowSize = contextWindow || settingSize;
   const ratio = Math.min(1, tokens / windowSize);
   const pct = Math.round(ratio * 100);
   const fillColor =
@@ -664,20 +703,91 @@ function ContextProgressBar({ tokens, contextWindow, label }: { tokens?: number;
       : ratio > 0.6
         ? "text-warning"
         : "text-success";
-  const tooltip = `${label}: ${formatTokenCount(tokens)} / ${formatTokenCount(windowSize)} tokens (${pct}%)`;
+  const statusColor =
+    ratio > 0.8
+      ? "text-error"
+      : ratio > 0.6
+        ? "text-warning"
+        : "text-success";
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const remaining = Math.max(0, windowSize - tokens);
 
   return (
-    <div
-      className="flex items-center gap-1.5 flex-shrink-0 cursor-default"
-      title={tooltip}
-    >
-      <div className="relative w-12 h-2 rounded-sm bg-text-muted/15 overflow-hidden pointer-events-none">
-        <div
-          className={`absolute top-0 left-0 h-full ${fillColor} transition-all duration-500`}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className={`text-[10px] tabular-nums leading-none font-medium pointer-events-none ${pctColor}`}>{pct}%</span>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 flex-shrink-0 cursor-pointer rounded-md px-1 py-0.5
+                   hover:bg-bg-tertiary/50 transition-colors"
+      >
+        <div className="relative w-12 h-2 rounded-sm bg-text-muted/15 overflow-hidden pointer-events-none">
+          <div
+            className={`absolute top-0 left-0 h-full ${fillColor} transition-all duration-500`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className={`text-[10px] tabular-nums leading-none font-medium pointer-events-none ${pctColor}`}>{pct}%</span>
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-[220px] rounded-lg
+                        bg-bg-secondary border border-border shadow-xl z-50 overflow-hidden">
+          {/* Header */}
+          <div className="px-3 pt-2.5 pb-2">
+            <p className="text-[10px] text-text-muted uppercase tracking-wider mb-2">{label}</p>
+            {/* Large progress bar */}
+            <div className="relative w-full h-2.5 rounded-full bg-text-muted/10 overflow-hidden">
+              <div
+                className={`absolute top-0 left-0 h-full rounded-full ${fillColor} transition-all duration-500`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            {/* Stats */}
+            <div className="flex justify-between items-baseline mt-2">
+              <span className="text-xs font-medium text-text-primary tabular-nums">
+                {formatTokenCount(tokens)}
+              </span>
+              <span className="text-[10px] text-text-muted tabular-nums">
+                / {formatTokenCount(windowSize)}
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline mt-0.5">
+              <span className="text-[10px] text-text-muted">{t("contextWindow.remaining")}</span>
+              <span className={`text-[10px] font-medium tabular-nums ${statusColor}`}>
+                {formatTokenCount(remaining)}
+              </span>
+            </div>
+          </div>
+          {/* Context window size picker */}
+          <div className="border-t border-border px-3 pt-2 pb-2.5">
+            <p className="text-[10px] text-text-muted uppercase tracking-wider mb-1.5">{t("contextWindow.size")}</p>
+            <div className="flex gap-1">
+              {CONTEXT_WINDOW_OPTIONS.map(({ key }) => (
+                <button
+                  key={key}
+                  onClick={() => updateSettings({ contextWindow: key })}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                    (contextWindowSetting || "200k") === key
+                      ? "bg-accent text-white"
+                      : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary/30"
+                  }`}
+                >
+                  {t(`contextWindow.${key}`)}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-text-muted mt-1.5 leading-snug">
+              {t("contextWindow.hint")}
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -928,12 +1038,10 @@ export default function InputArea({
                   </>
                 )}
                 {models.length > 0 ? (
-                  <DropdownSelect
-                    value={model}
-                    options={models.map((m) => ({ value: m, label: m }))}
-                    onChange={(v) => onModelChange?.(v)}
-                    icon={<Cpu size={12} className="flex-shrink-0" />}
-                    tooltip={t("input.model")}
+                  <ModelPanel
+                    model={model}
+                    models={models}
+                    onModelChange={(v) => onModelChange?.(v)}
                   />
                 ) : (
                   <input

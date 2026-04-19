@@ -177,7 +177,7 @@ export default function App() {
     // Find or create session for this project
     const sessionId = chatStore.createSession(
       projectPath,
-      settings.model || "claude-sonnet-4-20250514",
+      settings.defaultModel || settings.model || "claude-sonnet-4-20250514",
       "auto"
     );
 
@@ -212,6 +212,10 @@ export default function App() {
         api_key: settings.apiKey || undefined,
         base_url: settings.baseUrl || undefined,
         resume_id: resumeId,
+        effort: settings.effort || undefined,
+        haiku_model: settings.haikuModel || undefined,
+        sonnet_model: settings.sonnetModel || undefined,
+        opus_model: settings.opusModel || undefined,
       });
     } catch (err) {
       chatStore.handleStreamDone(sessionId, String(err));
@@ -234,17 +238,24 @@ export default function App() {
       // Extract last assistant message as summary
       const msgs = useChatStore.getState().messages[payload.session_id] || [];
       let lastMessage = "";
+      let lastUserPrompt = "";
       for (let i = msgs.length - 1; i >= 0; i--) {
-        if (msgs[i].role === "assistant") {
+        if (!lastMessage && msgs[i].role === "assistant") {
           lastMessage = msgs[i].content
             .filter((b) => b.type === "text")
             .map((b) => b.text || "")
             .join("\n")
             .trim();
-          if (lastMessage) break;
         }
+        if (!lastUserPrompt && msgs[i].role === "user") {
+          lastUserPrompt = msgs[i].content
+            .filter((b) => b.type === "text")
+            .map((b) => b.text || "")
+            .join("\n")
+            .trim();
+        }
+        if (lastMessage && lastUserPrompt) break;
       }
-      if (lastMessage.length > 4000) lastMessage = lastMessage.slice(0, 4000) + "…";
 
       // Sync completion to Lark bot sidecar (for all sessions, not just Lark-initiated)
       const larkStatus = useLarkStore.getState().status;
@@ -260,7 +271,25 @@ export default function App() {
       // Lark-initiated execution: send notification card
       const larkStore = useLarkStore.getState();
       const execution = larkStore.getLarkExecution(payload.session_id);
-      if (!execution || execution.status !== "running") return;
+      if (!execution || execution.status !== "running") {
+        // Non-Lark-initiated task: notify if notifyOnComplete is enabled
+        if (
+          larkStore.config.notifyOnComplete &&
+          larkStore.status === "connected" &&
+          larkStore.config.lastChatId &&
+          lastMessage
+        ) {
+          const session = useChatStore.getState().sessions.find((s) => s.id === payload.session_id);
+          const title = payload.error ? "❌ 任务失败" : "✅ 任务完成";
+          const projectLabel = session?.projectName || "Task";
+          const promptLine = lastUserPrompt ? `**📝 ${lastUserPrompt}**\n\n` : "";
+          const content = payload.error
+            ? `**${projectLabel}**\n\n${promptLine}**错误：**\n${payload.error}`
+            : `**${projectLabel}**\n\n${promptLine}${lastMessage}`;
+          larkSendNotification(larkStore.config.lastChatId, title, content, payload.error ? "error" : "end").catch(() => {});
+        }
+        return;
+      }
 
       const durationSec = Math.round((Date.now() - execution.startedAt) / 1000);
       const summary = lastMessage
@@ -312,6 +341,7 @@ export default function App() {
             timestamp: msg.timestamp,
             status: "processing",
           });
+          if (msg.chat_id) larkStore.setLastChatId(msg.chat_id);
         } else if (msg.type === "ai_reply") {
           larkStore.updateMessage(msg.message_id, {
             aiReply: msg.reply,
@@ -321,12 +351,13 @@ export default function App() {
           larkStore.addTask(msg.task);
           // Create a session for this task so it shows in sidebar
           const projectDir = msg.task.projectPath || settings.workingDirectory || `lark://${msg.task.projectName || "task"}`;
-          const sessionId = chatStore.createSession(projectDir, settings.model || "claude-sonnet-4-20250514", "auto");
+          const sessionId = chatStore.createSession(projectDir, settings.defaultModel || settings.model || "claude-sonnet-4-20250514", "auto");
           larkStore.setTaskSession(msg.task.id, sessionId);
           chatStore.addSystemMessage(sessionId, `[飞书任务] ${msg.task.description}`);
         } else if (msg.type === "task_updated") {
           larkStore.updateTask(msg.task_id, { status: msg.status });
         } else if (msg.type === "lark_execute") {
+          if (msg.chat_id) larkStore.setLastChatId(msg.chat_id);
           // AI understood intent — execute through main chat flow
           handleLarkExecute(msg).catch((err) =>
             emitDebug("error", `[lark] Execute failed: ${err}`)

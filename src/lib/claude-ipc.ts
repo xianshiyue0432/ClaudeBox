@@ -17,6 +17,14 @@ export interface SendMessageRequest {
   resume_id?: string;
   /** UI locale — used to instruct Claude to respond in the matching language */
   locale?: string;
+  /** Effort level: low / medium / high / max */
+  effort?: string;
+  /** Context window size: 200k / 1m */
+  context_window?: string;
+  /** Model tier defaults — passed as ANTHROPIC_DEFAULT_*_MODEL env vars */
+  haiku_model?: string;
+  sonnet_model?: string;
+  opus_model?: string;
 }
 
 /** Send a message (spawns claude -p per message, with --resume for multi-turn). Returns PID. */

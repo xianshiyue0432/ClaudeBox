@@ -36,6 +36,7 @@ const en: TranslationDict = {
   "input.addModelsHint": "Add models in Settings",
   "input.cliNotDetected": "Claude CLI not detected. Check Settings.",
   "input.tools": "Tools",
+  "input.toolsHint": "Checked tools are auto-allowed",
   "input.contextWindow": "Context window",
   "input.skills": "Skills",
   "skill.search": "Search skills...",
@@ -102,6 +103,30 @@ const en: TranslationDict = {
   "settings.notificationsHint": "Notify when tasks complete or authorization is needed.",
   "settings.defaultModel": "(default)",
   "settings.setDefault": "Set as default model",
+
+  // Settings — Model Tiers & Effort
+  "settings.tierModels": "Model Tier Defaults",
+  "settings.tierModelsHint": "Claude automatically selects model tiers for subtasks. Configure which model to use for each tier.",
+  "settings.haikuModel": "Haiku",
+  "settings.sonnetModel": "Sonnet",
+  "settings.opusModel": "Opus",
+  "settings.tierPlaceholder": "Leave empty to use default",
+  "settings.effort": "Effort Level",
+  "settings.effortHint": "Controls reasoning depth. Higher effort = more intelligence, slower response.",
+  "effort.low": "Low",
+  "effort.medium": "Medium",
+  "effort.high": "High",
+  "effort.max": "Max",
+  "input.effort": "Effort",
+
+  // Settings — Context Window
+  "settings.contextWindow": "Context Window",
+  "settings.contextWindowHint": "Models like Sonnet support up to 1M context. Enable if your plan supports it.",
+  "contextWindow.200k": "200K",
+  "contextWindow.1m": "1M",
+  "contextWindow.remaining": "Remaining",
+  "contextWindow.size": "Window Size",
+  "contextWindow.hint": "1M requires a supported model and plan.",
 
   // Settings Tabs
   "settings.tab.environment": "Environment",
@@ -235,6 +260,8 @@ const en: TranslationDict = {
   "lark.connect": "Connect",
   "lark.disconnect": "Disconnect",
   "lark.autoConnect": "Auto-connect on startup",
+  "lark.notifyOnComplete": "Notify on task completion",
+  "lark.notifyOnCompleteHint": "Push the last message to Lark when a task finishes.",
   "lark.missingCredentials": "Please enter App ID and App Secret.",
   "lark.hint": "Connect a Lark bot to remotely control Claude Code from your phone or any Lark client — send coding tasks, review results, and manage projects on the go via WebSocket (no public URL needed).",
 
@@ -298,6 +325,7 @@ const zh: TranslationDict = {
   "input.addModelsHint": "请在设置中添加模型",
   "input.cliNotDetected": "未检测到 Claude CLI，请检查设置。",
   "input.tools": "工具",
+  "input.toolsHint": "勾选后自动允许该工具",
   "input.contextWindow": "上下文窗口",
   "input.skills": "技能",
   "skill.search": "搜索技能...",
@@ -364,6 +392,30 @@ const zh: TranslationDict = {
   "settings.notificationsHint": "任务完成或需要授权时发送桌面通知。",
   "settings.defaultModel": "（默认）",
   "settings.setDefault": "设为默认模型",
+
+  // Settings — Model Tiers & Effort
+  "settings.tierModels": "模型层级默认值",
+  "settings.tierModelsHint": "Claude 会自动为子任务选择模型层级。可配置每个层级使用的模型。",
+  "settings.haikuModel": "Haiku",
+  "settings.sonnetModel": "Sonnet",
+  "settings.opusModel": "Opus",
+  "settings.tierPlaceholder": "留空使用默认模型",
+  "settings.effort": "推理等级",
+  "settings.effortHint": "控制推理深度。等级越高 = 越智能，响应越慢。",
+  "effort.low": "Low",
+  "effort.medium": "Medium",
+  "effort.high": "High",
+  "effort.max": "Max",
+  "input.effort": "推理等级",
+
+  // Settings — Context Window
+  "settings.contextWindow": "上下文窗口",
+  "settings.contextWindowHint": "部分模型（如 Sonnet）支持最高 1M 上下文。需订阅计划支持后启用。",
+  "contextWindow.200k": "200K",
+  "contextWindow.1m": "1M",
+  "contextWindow.remaining": "剩余",
+  "contextWindow.size": "窗口大小",
+  "contextWindow.hint": "1M 需要模型和订阅计划支持。",
 
   // Settings Tabs
   "settings.tab.environment": "环境检测",
@@ -497,6 +549,8 @@ const zh: TranslationDict = {
   "lark.connect": "连接",
   "lark.disconnect": "断开",
   "lark.autoConnect": "启动时自动连接",
+  "lark.notifyOnComplete": "任务完成通知",
+  "lark.notifyOnCompleteHint": "任务完成时将最后一条消息推送到飞书。",
   "lark.missingCredentials": "请输入 App ID 和 App Secret。",
   "lark.hint": "配置飞书机器人后，可通过手机或任意飞书客户端远程操控 Claude Code —— 发送编码任务、查看执行结果、管理项目，随时随地 Remote Coding。使用 WebSocket 长连接，无需公网地址。",
 

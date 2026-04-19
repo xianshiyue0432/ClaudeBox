@@ -144,17 +144,18 @@ function formatTaskList() {
 
   for (const t of devTasks) {
     const statusEmoji = t.status === "done" ? "✅" : t.status === "in_progress" ? "🔄" : "⏳";
-    allItems.push(`${statusEmoji} **[${t.id}]** ${t.projectName}: ${t.description}\n状态: \`${t.status}\``);
+    allItems.push(`${statusEmoji} **${t.projectName}**\n📌 ${t.description}\n状态: \`${t.status}\``);
   }
 
   for (const a of appActivities) {
     const elapsed = Math.round((Date.now() - a.startedAt) / 1000);
     const statusEmoji = a.status === "completed" ? "✅" : a.status === "error" ? "❌" : "🔄";
+    const statusLabel = a.status === "completed" ? "已完成" : a.status === "error" ? "失败" : "运行中";
     const projectName = (a.projectPath || "").split("/").pop() || "未知项目";
-    let line = `${statusEmoji} **[APP]** ${projectName}: ${a.prompt}\n状态: \`${a.status}\` · 耗时: ${elapsed}秒`;
+    const timeStr = elapsed >= 60 ? `${Math.floor(elapsed / 60)}分${elapsed % 60}秒` : `${elapsed}秒`;
+    let line = `${statusEmoji} **${projectName}**\n📝 ${a.prompt}\n⏱️ ${timeStr} · ${statusLabel}`;
     if (a.lastMessage) {
-      const truncated = a.lastMessage.length > 200 ? a.lastMessage.slice(0, 200) + "…" : a.lastMessage;
-      line += `\n\n> ${truncated.replace(/\n/g, "\n> ")}`;
+      line += `\n\n> ${a.lastMessage.replace(/\n/g, "\n> ")}`;
     }
     allItems.push(line);
   }
@@ -550,14 +551,19 @@ async function handleLarkMessage(data) {
       }
 
     } else if (intent.action === "info") {
-      // Direct info response
+      // Direct info response — use card for rich formatting
       const reply = intent.prompt || "暂无相关信息。";
       try {
+        const card = buildNotificationCard(
+          intent.summary || "ClaudeBox",
+          reply,
+          "blue",
+        );
         await client.im.message.reply({
           path: { message_id: messageId },
           data: {
-            content: JSON.stringify({ text: reply }),
-            msg_type: "text",
+            content: JSON.stringify(card),
+            msg_type: "interactive",
           },
         });
         emit({ type: "ai_reply", message_id: messageId, reply });

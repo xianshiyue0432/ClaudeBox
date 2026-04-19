@@ -7,6 +7,8 @@ export interface LarkConfig {
   appId: string;
   appSecret: string;
   autoConnect: boolean;
+  notifyOnComplete: boolean;
+  lastChatId: string;
 }
 
 export type LarkStatus =
@@ -73,14 +75,15 @@ interface LarkState {
   addLarkExecution: (execution: LarkExecution) => void;
   updateLarkExecution: (sessionId: string, updates: Partial<LarkExecution>) => void;
   getLarkExecution: (sessionId: string) => LarkExecution | undefined;
+  setLastChatId: (chatId: string) => void;
 }
-
-// ── Defaults ─────────────────────────────────────────────────────────
 
 const defaultConfig: LarkConfig = {
   appId: "",
   appSecret: "",
   autoConnect: false,
+  notifyOnComplete: false,
+  lastChatId: "",
 };
 
 const CONFIG_KEY = "lark-config";
@@ -178,4 +181,10 @@ export const useLarkStore = create<LarkState>((set, get) => ({
   },
 
   getLarkExecution: (sessionId) => get().larkExecutions[sessionId],
+
+  setLastChatId: (chatId) => {
+    if (chatId && chatId !== get().config.lastChatId) {
+      get().updateConfig({ lastChatId: chatId });
+    }
+  },
 }));

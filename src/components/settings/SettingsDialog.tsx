@@ -308,6 +308,86 @@ function ModelSection() {
         </p>
       </div>
 
+      {/* Model Tier Defaults */}
+      <div>
+        <label className="text-sm font-medium text-text-primary block mb-1.5">
+          {t("settings.tierModels")}
+        </label>
+        <div className="space-y-2">
+          {([
+            ["haikuModel", t("settings.haikuModel"), "claude-haiku-4-5-20251001"],
+            ["sonnetModel", t("settings.sonnetModel"), "claude-sonnet-4-20250514"],
+            ["opusModel", t("settings.opusModel"), "claude-opus-4-7"],
+          ] as const).map(([field, label, placeholder]) => (
+            <div key={field} className="flex items-center gap-2">
+              <span className="text-xs text-text-secondary w-14 shrink-0">{label}</span>
+              <input
+                type="text"
+                value={(settings as any)[field] || ""}
+                onChange={(e) => updateSettings({ [field]: e.target.value })}
+                placeholder={placeholder}
+                className="flex-1 rounded-lg bg-input-bg border border-border px-3 py-1.5 text-sm
+                           text-text-primary placeholder:text-text-muted
+                           focus:outline-none focus:ring-2 focus:ring-accent/50"
+              />
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-text-muted mt-1">
+          {t("settings.tierModelsHint")}
+        </p>
+      </div>
+
+      {/* Effort Level */}
+      <div>
+        <label className="text-sm font-medium text-text-primary block mb-1.5">
+          {t("settings.effort")}
+        </label>
+        <div className="flex gap-1">
+          {(["low", "medium", "high", "max"] as const).map((level) => (
+            <button
+              key={level}
+              onClick={() => updateSettings({ effort: level })}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                (settings.effort || "high") === level
+                  ? "bg-accent text-white"
+                  : "bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+              }`}
+            >
+              {t(`effort.${level}`)}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-text-muted mt-1">
+          {t("settings.effortHint")}
+        </p>
+      </div>
+
+      {/* Context Window */}
+      <div>
+        <label className="text-sm font-medium text-text-primary block mb-1.5">
+          {t("settings.contextWindow")}
+        </label>
+        <div className="flex gap-1">
+          {(["200k", "1m"] as const).map((size) => (
+            <button
+              key={size}
+              onClick={() => updateSettings({ contextWindow: size })}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                (settings.contextWindow || "200k") === size
+                  ? "bg-accent text-white"
+                  : "bg-bg-secondary text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+              }`}
+            >
+              {t(`contextWindow.${size}`)}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-text-muted mt-1">
+          {t("settings.contextWindowHint")}
+        </p>
+      </div>
+
       {/* API Key */}
       <div>
         <label className="text-sm font-medium text-text-primary block mb-1.5">
@@ -447,15 +527,29 @@ function LarkSettingsSection() {
       </div>
 
       <div className="flex items-center justify-between">
-        <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-          <input
-            type="checkbox"
-            checked={config.autoConnect}
-            onChange={(e) => updateConfig({ autoConnect: e.target.checked })}
-            className="rounded border-border"
-          />
-          {t("lark.autoConnect")}
-        </label>
+        <div className="flex flex-col gap-1.5">
+          <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.autoConnect}
+              onChange={(e) => updateConfig({ autoConnect: e.target.checked })}
+              className="rounded border-border"
+            />
+            {t("lark.autoConnect")}
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+            <input
+              type="checkbox"
+              checked={config.notifyOnComplete ?? false}
+              onChange={(e) => updateConfig({ notifyOnComplete: e.target.checked })}
+              className="rounded border-border"
+            />
+            <span>
+              {t("lark.notifyOnComplete")}
+              <span className="text-text-muted ml-1">— {t("lark.notifyOnCompleteHint")}</span>
+            </span>
+          </label>
+        </div>
 
         <button
           onClick={handleToggle}

@@ -616,6 +616,14 @@ pub struct SendMessageRequest {
     pub resume_id: Option<String>,
     /// UI locale — forwarded to sidecar for language-aware system prompt
     pub locale: Option<String>,
+    /// Effort level: low / medium / high / max
+    pub effort: Option<String>,
+    /// Context window size: 200k / 1m
+    pub context_window: Option<String>,
+    /// Model tier defaults
+    pub haiku_model: Option<String>,
+    pub sonnet_model: Option<String>,
+    pub opus_model: Option<String>,
 }
 
 // ── Commands ─────────────────────────────────────────────────────────
@@ -914,6 +922,8 @@ pub async fn send_message(
         "permissionMode": request.permission_mode.as_deref().unwrap_or(""),
         "attachments": request.attachments.as_deref().unwrap_or(&[]),
         "locale": request.locale.as_deref().unwrap_or(""),
+        "effort": request.effort.as_deref().unwrap_or(""),
+        "contextWindow": request.context_window.as_deref().unwrap_or(""),
     });
 
     emit_debug(&app, &session_id, "process", &format!("$ node {} (start: prompt=\"{}\")",
@@ -941,6 +951,24 @@ pub async fn send_message(
                     request.base_url.as_deref()
                         .filter(|s| !s.is_empty())
                         .map(|u| ("ANTHROPIC_BASE_URL".to_string(), u.to_string()))
+                        .into_iter()
+                )
+                .chain(
+                    request.haiku_model.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|m| ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), m.to_string()))
+                        .into_iter()
+                )
+                .chain(
+                    request.sonnet_model.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|m| ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), m.to_string()))
+                        .into_iter()
+                )
+                .chain(
+                    request.opus_model.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|m| ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), m.to_string()))
                         .into_iter()
                 )
         )

@@ -526,10 +526,12 @@ async function main() {
     permissionMode,
     attachments,
     locale,
+    effort,
+    contextWindow,
   } = startMsg;
 
   // Log config for diagnostics (to stderr, which Rust captures)
-  console.error(`[bridge] model=${model || "(default)"} cwd=${cwd} permissionMode=${permissionMode || "(default)"}`);
+  console.error(`[bridge] model=${model || "(default)"} cwd=${cwd} permissionMode=${permissionMode || "(default)"} contextWindow=${contextWindow || "200k"}`);
   console.error(`[bridge] ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY ? "set (" + process.env.ANTHROPIC_API_KEY.slice(0, 10) + "...)" : "NOT SET"}`);
   console.error(`[bridge] ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL || "NOT SET"}`);
 
@@ -560,6 +562,8 @@ async function main() {
 
   if (cwd) options.cwd = cwd;
   if (model) options.model = model;
+  if (effort) options.effort = effort;
+  if (contextWindow === "1m") options.betas = ["context-1m-2025-08-07"];
   if (resume) options.resume = resume;
   if (permissionMode) options.permissionMode = permissionMode;
   if (allowedTools && allowedTools.length > 0) {

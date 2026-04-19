@@ -652,6 +652,11 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           })),
           resume_id: resumeId,
           locale: settings.locale || undefined,
+          effort: settings.effort || undefined,
+          context_window: settings.contextWindow || undefined,
+          haiku_model: settings.haikuModel || undefined,
+          sonnet_model: settings.sonnetModel || undefined,
+          opus_model: settings.opusModel || undefined,
         });
         addLaunchMessage(currentSessionId, pid, resumeId);
         // Sync activity to Lark bot if connected

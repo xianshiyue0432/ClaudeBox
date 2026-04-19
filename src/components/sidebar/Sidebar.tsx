@@ -101,7 +101,7 @@ export default function Sidebar({
     if (selected && typeof selected === "string") {
       createSession(
         selected,
-        settings.model || "",
+        settings.defaultModel || settings.model || "",
         settings.permissionMode || ""
       );
     }

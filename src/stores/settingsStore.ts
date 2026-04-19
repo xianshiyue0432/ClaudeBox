@@ -5,6 +5,11 @@ export interface Settings {
   model: string;
   models: string[];
   defaultModel: string;
+  haikuModel: string;
+  sonnetModel: string;
+  opusModel: string;
+  effort: string;
+  contextWindow: "200k" | "1m";
   permissionMode: string;
   claudePath: string;
   workingDirectory: string;
@@ -35,6 +40,11 @@ const defaultSettings: Settings = {
   model: "",
   models: [],
   defaultModel: "",
+  haikuModel: "",
+  sonnetModel: "",
+  opusModel: "",
+  effort: "high",
+  contextWindow: "200k",
   permissionMode: "",
   claudePath: "claude",
   workingDirectory: "",
