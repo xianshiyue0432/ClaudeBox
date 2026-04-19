@@ -55,6 +55,7 @@ pub fn run() {
             claude::get_node_installer_url,
             claude::download_and_open_node_installer,
             claude::install_claude_code,
+            claude::preload_skills,
             claude::storage_read,
             claude::storage_write,
             claude::storage_remove,

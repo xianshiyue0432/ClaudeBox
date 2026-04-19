@@ -3,14 +3,14 @@ import {
   Send, Square, AlertCircle, ChevronDown, ChevronUp, GitBranch,
   Wrench, Check, Plus, X, FileCode2, FileText,
   Image, FileType, Terminal, Globe, Settings2, Cpu, Eraser,
-  Loader2, SquareTerminal, Zap, Search,
+  Loader2, SquareTerminal, Zap, Search, RefreshCw,
 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch, gitDiffFiles } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
 import { parseSkills } from "../../lib/skills";
-import { useChatStore } from "../../stores/chatStore";
+import { useSkillsStore } from "../../stores/skillsStore";
 
 export interface Attachment {
   path: string;
@@ -417,8 +417,10 @@ function BranchDropdown({
 
 function SkillsPopover({
   onSelect,
+  projectPath,
 }: {
   onSelect: (skillName: string) => void;
+  projectPath?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -426,12 +428,11 @@ function SkillsPopover({
   const searchRef = useRef<HTMLInputElement>(null);
   const t = useT();
 
-  const sessionSkills = useChatStore((s) => {
-    const sid = s.currentSessionId;
-    if (!sid) return undefined;
-    const sess = s.sessions.find((x) => x.id === sid);
-    return sess ? { skills: sess.skills, sources: sess.skillSources } : undefined;
-  });
+  const { globalSkills, globalSources, projectSkills, loading, refresh, scanProject } = useSkillsStore();
+
+  useEffect(() => {
+    if (open && projectPath) scanProject(projectPath);
+  }, [open, projectPath]);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -448,9 +449,23 @@ function SkillsPopover({
     if (open) searchRef.current?.focus();
   }, [open]);
 
+  const mergedSkills = useMemo(() => {
+    const allSkills = [...globalSkills];
+    const sources = { ...globalSources };
+    const pNames = projectPath ? (projectSkills[projectPath] || []) : [];
+    const existingNames = new Set(allSkills.map((s) => s.name));
+    for (const name of pNames) {
+      if (!existingNames.has(name)) {
+        allSkills.push({ name, desc: name });
+      }
+      sources[name] = "project";
+    }
+    return { skills: allSkills, sources };
+  }, [globalSkills, globalSources, projectSkills, projectPath]);
+
   const categories = useMemo(
-    () => parseSkills(sessionSkills?.skills ?? [], sessionSkills?.sources),
-    [sessionSkills?.skills, sessionSkills?.sources],
+    () => parseSkills(mergedSkills.skills, mergedSkills.sources),
+    [mergedSkills],
   );
 
   const query = search.toLowerCase().trim();
@@ -504,13 +519,27 @@ function SkillsPopover({
                   <X size={10} />
                 </button>
               )}
+              <button
+                onClick={() => refresh(projectPath)}
+                disabled={loading}
+                className="text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
+                title={t("skill.refresh")}
+              >
+                {loading ? <Loader2 size={11} className="animate-spin" /> : <RefreshCw size={11} />}
+              </button>
             </div>
           </div>
           {/* Skill list */}
           <div className="overflow-y-auto flex-1 py-1">
-            {totalCount === 0 && (
+            {loading && totalCount === 0 && (
+              <div className="px-3 py-4 text-center text-xs text-text-muted flex items-center justify-center gap-1.5">
+                <Loader2 size={12} className="animate-spin" />
+                {t("skill.loading")}
+              </div>
+            )}
+            {!loading && totalCount === 0 && (
               <div className="px-3 py-4 text-center text-xs text-text-muted">
-                No skills found
+                {t("skill.empty")}
               </div>
             )}
             {filtered.map((cat) => (
@@ -918,7 +947,7 @@ export default function InputArea({
                   />
                 )}
                 <span className="text-border/40 flex-shrink-0">|</span>
-                <SkillsPopover onSelect={handleSkillSelect} />
+                <SkillsPopover onSelect={handleSkillSelect} projectPath={projectPath} />
                 {onAllowedToolsChange && (
                   <>
                     <span className="text-border/40 flex-shrink-0">|</span>

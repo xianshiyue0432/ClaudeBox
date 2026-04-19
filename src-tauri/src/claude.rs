@@ -1395,6 +1395,66 @@ pub fn git_diff(cwd: String) -> Result<String, String> {
 }
 
 
+#[tauri::command]
+pub async fn preload_skills(
+    api_key: Option<String>,
+    base_url: Option<String>,
+) -> Result<String, String> {
+    let bridge_path = resolve_bridge_path()?;
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "Cannot determine home directory".to_string())?;
+
+    let start_msg = serde_json::json!({
+        "type": "list_skills",
+        "cwd": &home,
+    });
+
+    let mut cmd = command_with_path("node");
+    cmd.arg(&bridge_path)
+        .current_dir(&home)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::piped())
+        .envs(
+            api_key.as_deref()
+                .filter(|s| !s.is_empty())
+                .map(|k| ("ANTHROPIC_API_KEY".to_string(), k.to_string()))
+                .into_iter()
+                .chain(
+                    base_url.as_deref()
+                        .filter(|s| !s.is_empty())
+                        .map(|u| ("ANTHROPIC_BASE_URL".to_string(), u.to_string()))
+                        .into_iter()
+                )
+        )
+        .env_remove("CLAUDECODE");
+
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("Failed to spawn sidecar for skill preload: {}", e))?;
+
+    let mut stdin_handle = child.stdin.take().ok_or("No stdin")?;
+    let start_line = format!("{}\n", start_msg);
+    stdin_handle.write_all(start_line.as_bytes()).map_err(|e| e.to_string())?;
+    stdin_handle.flush().map_err(|e| e.to_string())?;
+    drop(stdin_handle);
+
+    let output = child.wait_with_output().map_err(|e| e.to_string())?;
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+
+    for line in stdout_str.lines() {
+        if line.contains("\"type\":\"skills\"") || line.contains("\"type\": \"skills\"") {
+            return Ok(line.to_string());
+        }
+    }
+
+    Err(format!(
+        "No skills response received. stderr: {}",
+        String::from_utf8_lossy(&output.stderr).chars().take(500).collect::<String>()
+    ))
+}
+
+
 #[derive(Clone, Serialize)]
 pub struct DirEntry {
     pub name: String,

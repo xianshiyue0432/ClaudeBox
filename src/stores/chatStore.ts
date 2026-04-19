@@ -9,6 +9,7 @@ import type {
   AnsweredToolData,
 } from "../lib/stream-parser";
 import { useTaskStore } from "./taskStore";
+import { useSkillsStore } from "./skillsStore";
 import { v4Style } from "../lib/utils";
 import { storageRead, storageWrite, storageRemove } from "../lib/storage";
 import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
@@ -28,7 +29,7 @@ export interface Session {
   model: string;
   permissionMode: string;
   allowedTools: string[];
-  skills?: string[];
+  skills?: ({ name: string; desc: string } | string)[];
   skillSources?: Record<string, "builtin" | "plugin" | "global" | "project">;
   createdAt: number;
   updatedAt: number;
@@ -441,15 +442,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (event.type === "system") {
         // Persist Claude session ID and skills for --resume across app restarts
-        if (event.session_id || event.skills) {
-          const sessions = get().sessions.map((s) => {
-            if (s.id !== sessionId) return s;
-            const updates: Partial<Session> = { updatedAt: Date.now() };
-            if (event.session_id) updates.claudeSessionId = event.session_id;
-            if (event.skills) updates.skills = event.skills;
-            if (event.skillSources) updates.skillSources = event.skillSources;
-            return { ...s, ...updates };
-          });
+        if (event.session_id) {
+          const sessions = get().sessions.map((s) =>
+            s.id === sessionId ? { ...s, claudeSessionId: event.session_id, updatedAt: Date.now() } : s
+          );
           saveSessions(sessions);
           set({ sessions });
         }
@@ -686,6 +682,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
             toolInput: event.input,
           },
         });
+      } else if (event.type === "skills" && event.skills) {
+        const sessions = get().sessions.map((s) =>
+          s.id === sessionId
+            ? { ...s, skills: event.skills, skillSources: event.skillSources, updatedAt: Date.now() }
+            : s
+        );
+        set({ sessions });
+        // Sync to global skills cache
+        try {
+          const normalizedSkills = (event.skills || []).map((s: any) =>
+            typeof s === "string" ? { name: s, desc: s } : s
+          );
+          useSkillsStore.getState().updateFromSession(normalizedSkills, event.skillSources || {});
+        } catch { /* ignore */ }
       } else if (event.type === "error") {
         try {
           const raw = JSON.parse(data);

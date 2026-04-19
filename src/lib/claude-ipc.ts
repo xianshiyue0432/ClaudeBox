@@ -205,6 +205,10 @@ export async function listDir(path: string): Promise<DirEntry[]> {
   return invoke("list_dir", { path });
 }
 
+export async function preloadSkills(apiKey?: string, baseUrl?: string): Promise<string> {
+  return invoke("preload_skills", { apiKey: apiKey || null, baseUrl: baseUrl || null });
+}
+
 /** Read a text file's content */
 export async function readFile(path: string): Promise<string> {
   return invoke("read_file", { path });

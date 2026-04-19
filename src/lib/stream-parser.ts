@@ -16,7 +16,7 @@ export interface ContentBlock {
 }
 
 export interface StreamMessage {
-  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "tool_permission" | "error";
+  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "tool_permission" | "skills" | "error";
   subtype?: string;
   session_id?: string;
   message?: {
@@ -45,8 +45,8 @@ export interface StreamMessage {
   // For system status events (compacting)
   status?: "compacting" | null;
   compact_metadata?: { trigger: "manual" | "auto"; pre_tokens: number };
-  // For system init — available skills from SDK
-  skills?: string[];
+  // For skills event — available skills from SDK supportedCommands()
+  skills?: ({ name: string; desc: string } | string)[];
   skillSources?: Record<string, "builtin" | "plugin" | "global" | "project">;
   // For user type — enriched tool result info
   tool_use_result?: {

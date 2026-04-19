@@ -15,6 +15,7 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useChatStore } from "./stores/chatStore";
 import { useTokenUsageStore } from "./stores/tokenUsageStore";
 import { useLarkStore } from "./stores/larkStore";
+import { useSkillsStore } from "./stores/skillsStore";
 import { startLarkBot, onLarkEvent, larkSendNotification, larkSendCommand } from "./lib/lark-ipc";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Loader2, AlertTriangle } from "lucide-react";
@@ -97,6 +98,7 @@ export default function App() {
         setClaudeAvailable(false);
         setSettingsOpen(true);
       });
+    useSkillsStore.getState().preloadGlobal();
   }, [settingsLoaded]);
 
   // Keyboard shortcut: Ctrl/Cmd+Shift+D to toggle debug

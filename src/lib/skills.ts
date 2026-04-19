@@ -11,22 +11,6 @@ export interface SkillCategory {
   skills: SkillDef[];
 }
 
-const DESCRIPTIONS: Record<string, string> = {
-  commit: "创建规范的 Git 提交",
-  init: "初始化 CLAUDE.md",
-  review: "审查 Pull Request",
-  "code-review": "代码审查 PR",
-  "security-review": "安全审查当前分支",
-  simplify: "精简和优化代码",
-  "update-config": "配置 settings.json",
-  "keybindings-help": "自定义快捷键",
-  "less-permission-prompts": "减少权限弹窗",
-  loop: "循环执行任务",
-  schedule: "定时执行远程代理",
-  "claude-api": "构建 Claude API 应用",
-  "claude-code-setup": "分析并推荐自动化配置",
-};
-
 const DEV_SKILLS = new Set([
   "commit", "init", "review", "code-review", "security-review", "simplify",
 ]);
@@ -54,24 +38,23 @@ const CATEGORY_LABELS: Record<string, string> = {
 const CATEGORY_ORDER = ["project", "global", "dev", "claude", "plugin", "builtin_other"];
 
 export function parseSkills(
-  names: string[],
+  skills: (SkillDef | string)[],
   sources?: Record<string, SkillSource>,
 ): SkillCategory[] {
   const groups: Record<string, SkillDef[]> = {};
 
-  for (const name of names) {
-    const src = sources?.[name];
+  for (const raw of skills) {
+    const skill: SkillDef = typeof raw === "string" ? { name: raw, desc: raw } : raw;
+    if (!skill.name) continue;
+    const src = sources?.[skill.name];
     let cat: string;
     if (src === "project") cat = "project";
     else if (src === "global") cat = "global";
     else if (src === "plugin") cat = "plugin";
-    else cat = builtinCategory(name);
+    else cat = builtinCategory(skill.name);
 
     if (!groups[cat]) groups[cat] = [];
-    groups[cat].push({
-      name,
-      desc: DESCRIPTIONS[name] || name,
-    });
+    groups[cat].push(skill);
   }
 
   return CATEGORY_ORDER

@@ -189,7 +189,8 @@ function scanSkillSources(cwd, skills) {
   const globalDir = join(homedir(), ".claude", "skills");
   const projectDir = cwd ? join(cwd, ".claude", "skills") : null;
   const globalSet = new Set(listSkillDirs(globalDir));
-  const projectSet = projectDir ? new Set(listSkillDirs(projectDir)) : new Set();
+  const isSameDir = projectDir && projectDir === globalDir;
+  const projectSet = (projectDir && !isSameDir) ? new Set(listSkillDirs(projectDir)) : new Set();
   const sources = {};
   for (const name of skills) {
     if (projectSet.has(name)) sources[name] = "project";
@@ -242,6 +243,7 @@ function rejectAllPending(reason) {
 const rl = createInterface({ input: process.stdin });
 /** @type {((line: string) => void) | null} */
 let onFirstLine = null;
+let stdinCloseAllowed = true;
 
 rl.on("line", (line) => {
   line = line.trim();
@@ -278,6 +280,7 @@ rl.on("line", (line) => {
 });
 
 rl.on("close", () => {
+  if (!stdinCloseAllowed) return;
   // stdin closed — reject pending requests and abort any running query
   rejectAllPending("Session terminated");
   if (activeAbort) activeAbort.abort();
@@ -479,10 +482,40 @@ async function main() {
     };
   });
 
-  if (startMsg.type !== "start") {
-    emitError(`Expected 'start' message, got '${startMsg.type}'`);
+  if (startMsg.type !== "start" && startMsg.type !== "list_skills") {
+    emitError(`Expected 'start' or 'list_skills' message, got '${startMsg.type}'`);
     process.exit(1);
   }
+
+  // ── list_skills: one-shot skill enumeration, no conversation ──
+  if (startMsg.type === "list_skills") {
+    stdinCloseAllowed = false;
+    try {
+      const wrapper = createClaudeWrapper();
+      const abortController = new AbortController();
+      const opts = {
+        abortController,
+        cwd: startMsg.cwd || homedir(),
+        env: cleanEnv(),
+        pathToClaudeCodeExecutable: wrapper.wrapperPath,
+        settingSources: ["user", "project", "local"],
+        systemPrompt: { type: "preset", preset: "claude_code" },
+      };
+      if (startMsg.model) opts.model = startMsg.model;
+      const conversation = query({ prompt: " ", options: opts });
+      const commands = await conversation.supportedCommands();
+      const skills = commands.map((c) => ({ name: c.name, desc: c.description || c.name }));
+      const sources = scanSkillSources(opts.cwd, commands.map((c) => c.name));
+      emit({ type: "skills", skills, skillSources: sources });
+      abortController.abort();
+      wrapper.cleanup?.();
+    } catch (err) {
+      emitError(`list_skills failed: ${err.message}`);
+    }
+    process.exit(0);
+  }
+
+  // ── Normal start flow ──
 
   const {
     prompt,
@@ -567,23 +600,24 @@ async function main() {
 
     const conversation = query({ prompt: finalPrompt, options });
 
+    // Fetch available skills (with descriptions) from SDK control API
+    conversation.supportedCommands().then((commands) => {
+      const skills = commands.map((c) => ({ name: c.name, desc: c.description || c.name }));
+      const sources = scanSkillSources(options.cwd, commands.map((c) => c.name));
+      emit({ type: "skills", skills, skillSources: sources });
+    }).catch((err) => {
+      console.error("[bridge] Failed to fetch supported commands:", err.message);
+    });
+
     for await (const message of conversation) {
       // Emit messages in a format compatible with the existing stream-json output
       switch (message.type) {
         case "system": {
-          // The init message — includes session_id, tools, model, etc.
-          // Also handles status updates (compacting) and compact_boundary events
-          let skillSources = undefined;
-          if (message.subtype === "init" && message.skills) {
-            skillSources = scanSkillSources(message.cwd, message.skills);
-          }
           emit({
             type: "system",
             subtype: message.subtype,
             session_id: message.session_id,
             tools: message.tools,
-            skills: message.skills,
-            skillSources,
             model: message.model,
             cwd: message.cwd,
             status: message.status,
