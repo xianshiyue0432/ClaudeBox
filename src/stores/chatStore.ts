@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { useTokenUsageStore } from "./tokenUsageStore";
+import { useSettingsStore } from "./settingsStore";
 import type {
   ChatMessage,
   ContentBlock,
@@ -10,6 +11,7 @@ import type {
 import { useTaskStore } from "./taskStore";
 import { v4Style } from "../lib/utils";
 import { storageRead, storageWrite, storageRemove } from "../lib/storage";
+import { sendNotification, isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
 /** Wraps a promise with a timeout — rejects after `ms` milliseconds */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -26,13 +28,15 @@ export interface Session {
   model: string;
   permissionMode: string;
   allowedTools: string[];
+  skills?: string[];
+  skillSources?: Record<string, "builtin" | "plugin" | "global" | "project">;
   createdAt: number;
   updatedAt: number;
   /** Real Claude session ID (from system init message) — used for --resume across app restarts */
   claudeSessionId?: string;
 }
 
-export const DEFAULT_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "WebFetch", "WebSearch", "NotebookEdit", "Agent"];
+export const DEFAULT_TOOLS = ["Write", "Edit", "Bash", "WebFetch", "WebSearch", "NotebookEdit", "Agent", "MCP"];
 
 interface ChatState {
   sessions: Session[];
@@ -150,6 +154,24 @@ function clearLocalStorageData(sessions: Session[]) {
       localStorage.removeItem(LS_MESSAGES_KEY_PREFIX + s.id);
     }
   } catch { /* ignore */ }
+}
+
+// ── Desktop notifications ──────────────────────────────────────────
+
+let notificationPermissionReady = false;
+(async () => {
+  try {
+    let granted = await isPermissionGranted();
+    if (!granted) granted = (await requestPermission()) === "granted";
+    notificationPermissionReady = granted;
+  } catch { /* Tauri API unavailable in dev */ }
+})();
+
+function notify(title: string, body?: string) {
+  if (!notificationPermissionReady) return;
+  if (!useSettingsStore.getState().settings.notifications) return;
+  if (document.hasFocus()) return;
+  try { sendNotification({ title, body }); } catch { /* ignore */ }
 }
 
 // ── Project name extraction ─────────────────────────────────────────
@@ -418,11 +440,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       };
 
       if (event.type === "system") {
-        // Persist Claude session ID for --resume across app restarts
-        if (event.session_id) {
-          const sessions = get().sessions.map((s) =>
-            s.id === sessionId ? { ...s, claudeSessionId: event.session_id, updatedAt: Date.now() } : s
-          );
+        // Persist Claude session ID and skills for --resume across app restarts
+        if (event.session_id || event.skills) {
+          const sessions = get().sessions.map((s) => {
+            if (s.id !== sessionId) return s;
+            const updates: Partial<Session> = { updatedAt: Date.now() };
+            if (event.session_id) updates.claudeSessionId = event.session_id;
+            if (event.skills) updates.skills = event.skills;
+            if (event.skillSources) updates.skillSources = event.skillSources;
+            return { ...s, ...updates };
+          });
           saveSessions(sessions);
           set({ sessions });
         }
@@ -621,11 +648,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
             msgs[i] = { ...msgs[i], isStreaming: false };
           }
         }
+        const projectName = get().sessions.find((s) => s.id === sessionId)?.projectName;
+        notify("ClaudeBox", `${projectName ?? "Task"} completed`);
         set({
           streamingSessions: { ...get().streamingSessions, [sessionId]: false },
           pendingInteraction: get().pendingInteraction?.sessionId === sessionId ? null : get().pendingInteraction,
         });
       } else if (event.type === "ask_user" && event.requestId) {
+        notify("ClaudeBox", "Claude needs your input");
         set({
           pendingInteraction: {
             type: "ask_user",
@@ -635,6 +665,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           },
         });
       } else if (event.type === "exit_plan" && event.requestId) {
+        notify("ClaudeBox", "Plan ready — approval needed");
         set({
           pendingInteraction: {
             type: "exit_plan",
@@ -642,6 +673,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
             sessionId,
             input: event.input,
             planContent: event.planContent,
+          },
+        });
+      } else if (event.type === "tool_permission" && event.requestId) {
+        notify("ClaudeBox", `Tool permission: ${event.toolName}`);
+        set({
+          pendingInteraction: {
+            type: "tool_permission",
+            requestId: event.requestId,
+            sessionId,
+            toolName: event.toolName,
+            toolInput: event.input,
           },
         });
       } else if (event.type === "error") {

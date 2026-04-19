@@ -4,6 +4,7 @@ import { storageRead, storageWrite } from "../lib/storage";
 export interface Settings {
   model: string;
   models: string[];
+  defaultModel: string;
   permissionMode: string;
   claudePath: string;
   workingDirectory: string;
@@ -11,6 +12,8 @@ export interface Settings {
   locale: "en" | "zh";
   apiKey: string;
   baseUrl: string;
+  autoStart: boolean;
+  notifications: boolean;
 }
 
 interface SettingsState {
@@ -31,6 +34,7 @@ function getSystemLocale(): "en" | "zh" {
 const defaultSettings: Settings = {
   model: "",
   models: [],
+  defaultModel: "",
   permissionMode: "",
   claudePath: "claude",
   workingDirectory: "",
@@ -38,6 +42,8 @@ const defaultSettings: Settings = {
   locale: getSystemLocale(),
   apiKey: "",
   baseUrl: "",
+  autoStart: false,
+  notifications: true,
 };
 
 /** Wraps a promise with a timeout — rejects after `ms` milliseconds */

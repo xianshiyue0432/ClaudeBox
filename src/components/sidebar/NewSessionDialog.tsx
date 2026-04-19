@@ -15,7 +15,7 @@ export default function NewSessionDialog({
   const { settings } = useSettingsStore();
   const { createSession } = useChatStore();
 
-  const [model, setModel] = useState(settings.model || "");
+  const [model, setModel] = useState(settings.defaultModel || settings.model || "");
   const [permissionMode, setPermissionMode] = useState(
     settings.permissionMode || ""
   );
@@ -68,9 +68,12 @@ export default function NewSessionDialog({
                          text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/50"
             >
               <option value="">Default (Sonnet)</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="opus">Opus</option>
-              <option value="haiku">Haiku</option>
+              {settings.models.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+              {!settings.models.includes("sonnet") && <option value="sonnet">Sonnet</option>}
+              {!settings.models.includes("opus") && <option value="opus">Opus</option>}
+              {!settings.models.includes("haiku") && <option value="haiku">Haiku</option>}
             </select>
           </div>
 

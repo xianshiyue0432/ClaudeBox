@@ -9,7 +9,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { readImageBase64, saveClipboardImage, listGitBranches, checkoutGitBranch, gitDiffFiles } from "../../lib/claude-ipc";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useT } from "../../lib/i18n";
-import { SKILL_CATEGORIES } from "../../lib/skills";
+import { parseSkills } from "../../lib/skills";
+import { useChatStore } from "../../stores/chatStore";
 
 export interface Attachment {
   path: string;
@@ -93,17 +94,15 @@ interface InputAreaProps {
   contextWindow?: number;
 }
 
-const ALL_TOOLS = [
-  { value: "Read", label: "Read" },
+const USER_TOOLS = [
   { value: "Write", label: "Write" },
   { value: "Edit", label: "Edit" },
   { value: "Bash", label: "Bash" },
-  { value: "Glob", label: "Glob" },
-  { value: "Grep", label: "Grep" },
   { value: "WebFetch", label: "WebFetch" },
   { value: "WebSearch", label: "WebSearch" },
   { value: "NotebookEdit", label: "NotebookEdit" },
   { value: "Agent", label: "Agent" },
+  { value: "MCP", label: "MCP" },
 ];
 
 function DropdownSelect({
@@ -194,6 +193,10 @@ function ToolsSelector({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  const userToolValues = USER_TOOLS.map((t) => t.value);
+  const userSelected = selected.filter((t) => userToolValues.includes(t));
+  const allUserSelected = userSelected.length === USER_TOOLS.length;
+
   const toggle = (tool: string) => {
     if (selected.includes(tool)) {
       onChange(selected.filter((t) => t !== tool));
@@ -201,8 +204,6 @@ function ToolsSelector({
       onChange([...selected, tool]);
     }
   };
-
-  const allSelected = selected.length === ALL_TOOLS.length;
 
   return (
     <div ref={ref} className="relative">
@@ -213,20 +214,20 @@ function ToolsSelector({
                    transition-colors"
       >
         <Wrench size={11} />
-        <span>{t("input.tools")} ({selected.length})</span>
+        <span>{t("input.tools")} ({userSelected.length})</span>
         {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
       {open && (
         <div className="absolute bottom-full left-0 mb-1 min-w-[150px] rounded-lg
                         bg-bg-secondary border border-border shadow-xl z-50 py-1">
           <button
-            onClick={() => onChange(allSelected ? [] : ALL_TOOLS.map((t) => t.value))}
+            onClick={() => onChange(allUserSelected ? selected.filter((t) => !userToolValues.includes(t)) : [...selected.filter((t) => !userToolValues.includes(t)), ...userToolValues])}
             className="block w-full text-left px-3 py-1.5 text-xs text-text-muted
                        hover:text-text-primary hover:bg-bg-tertiary/30 transition-colors border-b border-border"
           >
-            {allSelected ? t("input.deselectAll") : t("input.selectAll")}
+            {allUserSelected ? t("input.deselectAll") : t("input.selectAll")}
           </button>
-          {ALL_TOOLS.map((tool) => {
+          {USER_TOOLS.map((tool) => {
             const isSelected = selected.includes(tool.value);
             return (
               <button
@@ -425,6 +426,13 @@ function SkillsPopover({
   const searchRef = useRef<HTMLInputElement>(null);
   const t = useT();
 
+  const sessionSkills = useChatStore((s) => {
+    const sid = s.currentSessionId;
+    if (!sid) return undefined;
+    const sess = s.sessions.find((x) => x.id === sid);
+    return sess ? { skills: sess.skills, sources: sess.skillSources } : undefined;
+  });
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -440,16 +448,21 @@ function SkillsPopover({
     if (open) searchRef.current?.focus();
   }, [open]);
 
+  const categories = useMemo(
+    () => parseSkills(sessionSkills?.skills ?? [], sessionSkills?.sources),
+    [sessionSkills?.skills, sessionSkills?.sources],
+  );
+
   const query = search.toLowerCase().trim();
   const filtered = useMemo(() => {
-    if (!query) return SKILL_CATEGORIES;
-    return SKILL_CATEGORIES.map((cat) => ({
+    if (!query) return categories;
+    return categories.map((cat) => ({
       ...cat,
       skills: cat.skills.filter(
         (s) => s.name.toLowerCase().includes(query) || s.desc.toLowerCase().includes(query)
       ),
     })).filter((cat) => cat.skills.length > 0);
-  }, [query]);
+  }, [query, categories]);
 
   const totalCount = filtered.reduce((n, c) => n + c.skills.length, 0);
 

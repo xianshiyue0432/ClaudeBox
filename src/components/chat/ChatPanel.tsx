@@ -15,8 +15,8 @@ import TaskBoard from "./TaskBoard";
 import FileTree from "./FileTree";
 import FileViewer from "./FileViewer";
 import NewSessionDialog from "./NewSessionDialog";
-import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check, FileText } from "lucide-react";
-import type { ChatMessage, ContentBlock } from "../../lib/stream-parser";
+import { Sparkles, FolderOpen, Terminal, GitBranch, PanelRightClose, PanelRight, ChevronDown, ChevronRight, Loader2, CheckCircle, Check, FileText, ShieldAlert, ShieldCheck } from "lucide-react";
+import type { ChatMessage, ContentBlock, PendingInteraction } from "../../lib/stream-parser";
 
 interface ChatPanelProps {
   claudeAvailable: boolean;
@@ -249,6 +249,67 @@ const AgentRunContainer = memo(function AgentRunContainer({
     </>
   );
 });
+
+/** Inline permission card shown when Claude tries to use a tool not in the auto-approve list */
+function ToolPermissionCard({
+  interaction,
+  onRespond,
+}: {
+  interaction: PendingInteraction;
+  onRespond: (response: Record<string, unknown>) => void;
+}) {
+  const t = useT();
+  const toolName = interaction.toolName || "Unknown";
+  const toolInput = interaction.toolInput || {};
+
+  const inputSummary = (() => {
+    if (toolName === "Bash" && toolInput.command) return String(toolInput.command).slice(0, 120);
+    if (toolName === "Read" && toolInput.file_path) return String(toolInput.file_path);
+    if (toolName === "Write" && toolInput.file_path) return String(toolInput.file_path);
+    if (toolName === "Edit" && toolInput.file_path) return String(toolInput.file_path);
+    if (toolName === "Glob" && toolInput.pattern) return String(toolInput.pattern);
+    if (toolName === "Grep" && toolInput.pattern) return String(toolInput.pattern);
+    if (toolName === "WebFetch" && toolInput.url) return String(toolInput.url);
+    if (toolName === "WebSearch" && toolInput.query) return String(toolInput.query);
+    if (toolInput.description) return String(toolInput.description).slice(0, 100);
+    return "";
+  })();
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 mb-3">
+      <div className="rounded-lg border border-warning/40 bg-warning/5 overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-warning/20">
+          <ShieldAlert size={15} className="text-warning flex-shrink-0" />
+          <span className="text-sm font-medium text-text-primary">
+            {t("tool.permissionRequired", { tool: toolName })}
+          </span>
+        </div>
+        {inputSummary && (
+          <div className="px-4 py-2 text-xs text-text-secondary font-mono bg-bg-secondary/30 border-b border-warning/10 truncate">
+            {inputSummary}
+          </div>
+        )}
+        <div className="flex items-center gap-2 px-4 py-2.5">
+          <button
+            onClick={() => onRespond({ type: "response", requestId: interaction.requestId, behavior: "allow" })}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
+                       bg-success/15 text-success hover:bg-success/25 transition-colors cursor-pointer"
+          >
+            <ShieldCheck size={13} />
+            {t("tool.allow")}
+          </button>
+          <button
+            onClick={() => onRespond({ type: "response", requestId: interaction.requestId, behavior: "deny", message: "User denied tool use" })}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium
+                       bg-error/10 text-error hover:bg-error/20 transition-colors cursor-pointer"
+          >
+            {t("tool.deny")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 /** Branch dropdown switcher */
 function BranchSwitcher({
@@ -581,9 +642,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           model: currentSession.model || undefined,
           permission_mode: currentSession.permissionMode || undefined,
           claude_path: settings.claudePath || undefined,
-          allowed_tools: currentSession.allowedTools?.length
-            ? currentSession.allowedTools
-            : undefined,
+          allowed_tools: currentSession.allowedTools ?? [],
           api_key: settings.apiKey || undefined,
           base_url: settings.baseUrl || undefined,
           attachments: attachments?.map((a) => ({
@@ -972,6 +1031,14 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
                   );
                 })}
               </div>
+
+              {/* Tool permission card */}
+              {pendingInteraction?.type === "tool_permission" && (
+                <ToolPermissionCard
+                  interaction={pendingInteraction}
+                  onRespond={handleRespond}
+                />
+              )}
 
               {streamError && (
                 <div className="max-w-3xl mx-auto px-4 mb-4">

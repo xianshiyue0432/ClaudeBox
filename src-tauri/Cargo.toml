@@ -27,6 +27,8 @@ tauri-plugin-shell = "2.3.5"
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
 base64 = "0.22"
 # Enable SOCKS5 proxy support for reqwest (used by tauri-plugin-updater).
 # Cargo feature unification ensures the existing reqwest 0.13 gains the socks feature.

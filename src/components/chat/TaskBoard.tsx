@@ -24,6 +24,8 @@ export default function TaskBoard({ sessionId }: TaskBoardProps) {
   const total = sessionTasks.length;
   const hasInProgress = sessionTasks.some((t) => t.status === "in_progress");
 
+  const allDone = completed === total;
+
   return (
     <div className="border-t border-border bg-bg-secondary/30 px-4 py-2">
       <div className="max-w-3xl mx-auto">
@@ -37,7 +39,7 @@ export default function TaskBoard({ sessionId }: TaskBoardProps) {
           ) : (
             <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
           )}
-          <ListTodo size={13} className="text-accent flex-shrink-0" />
+          <ListTodo size={13} className={allDone ? "text-success flex-shrink-0" : "text-accent flex-shrink-0"} />
           <span className="text-xs font-medium text-text-secondary">
             Tasks
           </span>
@@ -48,13 +50,17 @@ export default function TaskBoard({ sessionId }: TaskBoardProps) {
           {collapsed && hasInProgress && (
             <Loader2 size={12} className="text-warning animate-spin flex-shrink-0" />
           )}
-          {/* Progress bar */}
-          <div className="flex-1 h-1 bg-border rounded-full overflow-hidden ml-1">
-            <div
-              className="h-full bg-accent rounded-full transition-all duration-500"
-              style={{ width: `${(completed / total) * 100}%` }}
-            />
-          </div>
+          {/* Progress indicator */}
+          {allDone ? (
+            <CheckCircle2 size={13} className="text-success flex-shrink-0" />
+          ) : (
+            <div className="w-20 h-1.5 bg-border/50 rounded-full overflow-hidden flex-shrink-0">
+              <div
+                className="h-full bg-success rounded-full transition-all duration-500"
+                style={{ width: `${(completed / total) * 100}%` }}
+              />
+            </div>
+          )}
         </button>
 
         {/* Task list — collapsible */}

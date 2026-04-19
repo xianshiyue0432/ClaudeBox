@@ -92,6 +92,14 @@ const en: TranslationDict = {
   "settings.done": "Done",
   "settings.copyCommand": "Copy command",
 
+  // Settings — Auto Start & Notifications & Default Model
+  "settings.autoStart": "Launch at Login",
+  "settings.autoStartHint": "Automatically start ClaudeBox when you log in.",
+  "settings.notifications": "Desktop Notifications",
+  "settings.notificationsHint": "Notify when tasks complete or authorization is needed.",
+  "settings.defaultModel": "(default)",
+  "settings.setDefault": "Set as default model",
+
   // Settings Tabs
   "settings.tab.environment": "Environment",
   "settings.tab.model": "Model",
@@ -180,6 +188,9 @@ const en: TranslationDict = {
   "tool.agentRunning": "Running",
   "tool.agentDone": "Done",
   "tool.clickToExpand": "Click to expand",
+  "tool.permissionRequired": "Claude wants to use {tool}",
+  "tool.allow": "Allow",
+  "tool.deny": "Deny",
 
   // Update
   "update.downloading": "Downloading update v{version}...",
@@ -340,6 +351,14 @@ const zh: TranslationDict = {
   "settings.done": "完成",
   "settings.copyCommand": "复制命令",
 
+  // Settings — Auto Start & Notifications & Default Model
+  "settings.autoStart": "登录时启动",
+  "settings.autoStartHint": "登录系统时自动启动 ClaudeBox。",
+  "settings.notifications": "桌面通知",
+  "settings.notificationsHint": "任务完成或需要授权时发送桌面通知。",
+  "settings.defaultModel": "（默认）",
+  "settings.setDefault": "设为默认模型",
+
   // Settings Tabs
   "settings.tab.environment": "环境检测",
   "settings.tab.model": "模型配置",
@@ -428,6 +447,9 @@ const zh: TranslationDict = {
   "tool.agentRunning": "运行中",
   "tool.agentDone": "已完成",
   "tool.clickToExpand": "点击展开",
+  "tool.permissionRequired": "Claude 请求使用 {tool}",
+  "tool.allow": "允许",
+  "tool.deny": "拒绝",
 
   // Update
   "update.downloading": "正在下载更新 v{version}...",

@@ -177,6 +177,29 @@ process.on("SIGINT", () => child.kill("SIGINT"));
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+function listSkillDirs(dir) {
+  try {
+    return readdirSync(dir).filter((name) => {
+      try { return statSync(join(dir, name)).isDirectory(); } catch { return false; }
+    });
+  } catch { return []; }
+}
+
+function scanSkillSources(cwd, skills) {
+  const globalDir = join(homedir(), ".claude", "skills");
+  const projectDir = cwd ? join(cwd, ".claude", "skills") : null;
+  const globalSet = new Set(listSkillDirs(globalDir));
+  const projectSet = projectDir ? new Set(listSkillDirs(projectDir)) : new Set();
+  const sources = {};
+  for (const name of skills) {
+    if (projectSet.has(name)) sources[name] = "project";
+    else if (globalSet.has(name)) sources[name] = "global";
+    else if (name.includes(":")) sources[name] = "plugin";
+    else sources[name] = "builtin";
+  }
+  return sources;
+}
+
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj) + "\n");
 }
@@ -279,9 +302,11 @@ function waitForResponse(requestId) {
 
 /**
  * canUseTool callback — intercepts AskUserQuestion and ExitPlanMode.
- * For other tools, auto-allow if in allowedTools list or deny.
+ * For other tools: auto-allow if in allowedTools list, otherwise ask user.
  */
 function makeCanUseTool(allowedTools, cwd) {
+  const allowedSet = new Set(allowedTools);
+
   return async (toolName, input, _options) => {
     // AskUserQuestion — send to frontend, wait for user answer
     if (toolName === "AskUserQuestion") {
@@ -355,9 +380,29 @@ function makeCanUseTool(allowedTools, cwd) {
       };
     }
 
-    // All other tools: auto-allow
-    // (The SDK + permissionMode handles the rest)
-    return { behavior: "allow" };
+    // Tool in allowedTools → auto-approve without prompting
+    if (allowedSet.has(toolName)) {
+      return { behavior: "allow", updatedInput: input };
+    }
+
+    // MCP tools — auto-approve if "MCP" wildcard is in allowedTools
+    if (toolName.startsWith("mcp__") && allowedSet.has("MCP")) {
+      return { behavior: "allow", updatedInput: input };
+    }
+
+    // Tool NOT in allowedTools → ask user for permission
+    const requestId = nextRequestId();
+    emit({
+      type: "tool_permission",
+      requestId,
+      toolName,
+      input,
+    });
+    const resp = await waitForResponse(requestId);
+    if (resp.behavior === "allow") {
+      return { behavior: "allow", updatedInput: input };
+    }
+    return { behavior: "deny", message: resp.message || "User denied tool use" };
   };
 }
 
@@ -485,7 +530,10 @@ async function main() {
   if (resume) options.resume = resume;
   if (permissionMode) options.permissionMode = permissionMode;
   if (allowedTools && allowedTools.length > 0) {
-    options.allowedTools = allowedTools;
+    const sdkTools = allowedTools.filter((t) => t !== "MCP");
+    if (sdkTools.length > 0) {
+      options.allowedTools = sdkTools;
+    }
   }
 
   // Workspace boundary — prevent Claude from writing outside the project
@@ -525,11 +573,17 @@ async function main() {
         case "system": {
           // The init message — includes session_id, tools, model, etc.
           // Also handles status updates (compacting) and compact_boundary events
+          let skillSources = undefined;
+          if (message.subtype === "init" && message.skills) {
+            skillSources = scanSkillSources(message.cwd, message.skills);
+          }
           emit({
             type: "system",
             subtype: message.subtype,
             session_id: message.session_id,
             tools: message.tools,
+            skills: message.skills,
+            skillSources,
             model: message.model,
             cwd: message.cwd,
             status: message.status,

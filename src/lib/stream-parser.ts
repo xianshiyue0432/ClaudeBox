@@ -16,7 +16,7 @@ export interface ContentBlock {
 }
 
 export interface StreamMessage {
-  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "error";
+  type: "assistant" | "user" | "system" | "result" | "ask_user" | "exit_plan" | "tool_permission" | "error";
   subtype?: string;
   session_id?: string;
   message?: {
@@ -45,6 +45,9 @@ export interface StreamMessage {
   // For system status events (compacting)
   status?: "compacting" | null;
   compact_metadata?: { trigger: "manual" | "auto"; pre_tokens: number };
+  // For system init — available skills from SDK
+  skills?: string[];
+  skillSources?: Record<string, "builtin" | "plugin" | "global" | "project">;
   // For user type — enriched tool result info
   tool_use_result?: {
     stdout?: string;
@@ -59,6 +62,8 @@ export interface StreamMessage {
   // For exit_plan type
   input?: Record<string, unknown>;
   planContent?: string;
+  // For tool_permission type
+  toolName?: string;
 }
 
 export interface StreamPayload {
@@ -135,7 +140,7 @@ export interface AskUserQuestion {
 }
 
 export interface PendingInteraction {
-  type: "ask_user" | "exit_plan";
+  type: "ask_user" | "exit_plan" | "tool_permission";
   requestId: string;
   sessionId: string;
   /** For ask_user: the questions array */
@@ -144,6 +149,10 @@ export interface PendingInteraction {
   input?: Record<string, unknown>;
   /** For exit_plan: the plan markdown content */
   planContent?: string;
+  /** For tool_permission: the tool name requesting permission */
+  toolName?: string;
+  /** For tool_permission: the tool input parameters */
+  toolInput?: Record<string, unknown>;
 }
 
 export type AnsweredToolData =

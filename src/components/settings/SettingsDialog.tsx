@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   X, CheckCircle, XCircle, Loader2, Plus, Trash2, Bot,
-  Monitor, Cpu, BarChart2, Info, ScrollText, RefreshCw,
+  Monitor, Cpu, BarChart2, Info, ScrollText, RefreshCw, Star,
 } from "lucide-react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
@@ -12,6 +12,7 @@ import { NodeStatusSection, ClaudeInstallButton } from "./InstallWizard";
 import { TokenStatsContent } from "./TokenStatsDialog";
 import type { UpdateStatus } from "../../lib/updater";
 import { getVersion } from "@tauri-apps/api/app";
+import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
 // ── Tab types ─────────────────────────────────────────────────────────
 
@@ -51,6 +52,22 @@ function EnvironmentSection({
 }) {
   const t = useT();
   const { settings, updateSettings } = useSettingsStore();
+  const [autoStartChecked, setAutoStartChecked] = useState(settings.autoStart);
+
+  useEffect(() => {
+    isAutostartEnabled().then(setAutoStartChecked).catch(() => {});
+  }, []);
+
+  const handleAutoStartToggle = async (checked: boolean) => {
+    setAutoStartChecked(checked);
+    try {
+      if (checked) await enableAutostart();
+      else await disableAutostart();
+      updateSettings({ autoStart: checked });
+    } catch {
+      setAutoStartChecked(!checked);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -111,6 +128,34 @@ function EnvironmentSection({
         <p className="text-xs text-text-muted mt-1">
           {t("settings.cliPathHint")}
         </p>
+      </div>
+
+      {/* Auto Start & Notifications */}
+      <div className="space-y-3 pt-2 border-t border-border">
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <span className="text-sm text-text-primary">{t("settings.autoStart")}</span>
+            <p className="text-xs text-text-muted">{t("settings.autoStartHint")}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={autoStartChecked}
+            onChange={(e) => handleAutoStartToggle(e.target.checked)}
+            className="rounded border-border accent-accent w-4 h-4"
+          />
+        </label>
+        <label className="flex items-center justify-between cursor-pointer">
+          <div>
+            <span className="text-sm text-text-primary">{t("settings.notifications")}</span>
+            <p className="text-xs text-text-muted">{t("settings.notificationsHint")}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.notifications}
+            onChange={(e) => updateSettings({ notifications: e.target.checked })}
+            className="rounded border-border accent-accent w-4 h-4"
+          />
+        </label>
       </div>
     </div>
   );
@@ -219,22 +264,41 @@ function ModelSection() {
                   {m === settings.model && (
                     <span className="ml-2 text-xs text-accent">{t("settings.active")}</span>
                   )}
+                  {m === settings.defaultModel && (
+                    <span className="ml-2 text-xs text-warning">{t("settings.defaultModel")}</span>
+                  )}
                 </span>
-                <button
-                  onClick={() => {
-                    const newModels = settings.models.filter((x) => x !== m);
-                    const updates: { models: string[]; model?: string } = { models: newModels };
-                    if (settings.model === m) {
-                      updates.model = newModels[0] || "";
-                    }
-                    updateSettings(updates);
-                  }}
-                  className="p-1 rounded hover:bg-error/20 text-text-muted hover:text-error
-                             transition-colors opacity-0 group-hover:opacity-100"
-                  title={t("settings.removeModel")}
-                >
-                  <Trash2 size={13} />
-                </button>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={() => updateSettings({ defaultModel: settings.defaultModel === m ? "" : m })}
+                    className={`p-1 rounded transition-colors ${
+                      m === settings.defaultModel
+                        ? "text-warning"
+                        : "text-text-muted hover:text-warning opacity-0 group-hover:opacity-100"
+                    }`}
+                    title={t("settings.setDefault")}
+                  >
+                    <Star size={13} fill={m === settings.defaultModel ? "currentColor" : "none"} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      const newModels = settings.models.filter((x) => x !== m);
+                      const updates: { models: string[]; model?: string; defaultModel?: string } = { models: newModels };
+                      if (settings.model === m) {
+                        updates.model = newModels[0] || "";
+                      }
+                      if (settings.defaultModel === m) {
+                        updates.defaultModel = "";
+                      }
+                      updateSettings(updates);
+                    }}
+                    className="p-1 rounded hover:bg-error/20 text-text-muted hover:text-error
+                               transition-colors opacity-0 group-hover:opacity-100"
+                    title={t("settings.removeModel")}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
