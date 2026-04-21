@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.5.1"
+version = "0.5.2"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -30,6 +30,8 @@ tauri-plugin-process = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-notification = "2"
 base64 = "0.22"
+arboard = { version = "3", features = ["image-data"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 # Enable SOCKS5 proxy support for reqwest (used by tauri-plugin-updater).
 # Cargo feature unification ensures the existing reqwest 0.13 gains the socks feature.
 reqwest = { version = "0.13", default-features = false, features = ["socks"] }

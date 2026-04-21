@@ -14,6 +14,28 @@ import type { UpdateStatus } from "../../lib/updater";
 import { getVersion } from "@tauri-apps/api/app";
 import { enable as enableAutostart, disable as disableAutostart, isEnabled as isAutostartEnabled } from "@tauri-apps/plugin-autostart";
 
+// ── Toggle Switch ────────────────────────────────────────────────────
+
+function ToggleSwitch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors
+        ${checked ? "bg-accent" : "bg-border"}
+        ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+    >
+      <span
+        className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform
+          ${checked ? "translate-x-[18px]" : "translate-x-[3px]"}`}
+      />
+    </button>
+  );
+}
+
 // ── Tab types ─────────────────────────────────────────────────────────
 
 type TabId = "environment" | "model" | "lark" | "tokens" | "about";
@@ -132,30 +154,20 @@ function EnvironmentSection({
 
       {/* Auto Start & Notifications */}
       <div className="space-y-3 pt-2 border-t border-border">
-        <label className="flex items-center justify-between cursor-pointer">
+        <div className="flex items-center justify-between">
           <div>
             <span className="text-sm text-text-primary">{t("settings.autoStart")}</span>
             <p className="text-xs text-text-muted">{t("settings.autoStartHint")}</p>
           </div>
-          <input
-            type="checkbox"
-            checked={autoStartChecked}
-            onChange={(e) => handleAutoStartToggle(e.target.checked)}
-            className="rounded border-border accent-accent w-4 h-4"
-          />
-        </label>
-        <label className="flex items-center justify-between cursor-pointer">
+          <ToggleSwitch checked={autoStartChecked} onChange={handleAutoStartToggle} />
+        </div>
+        <div className="flex items-center justify-between">
           <div>
             <span className="text-sm text-text-primary">{t("settings.notifications")}</span>
             <p className="text-xs text-text-muted">{t("settings.notificationsHint")}</p>
           </div>
-          <input
-            type="checkbox"
-            checked={settings.notifications}
-            onChange={(e) => updateSettings({ notifications: e.target.checked })}
-            className="rounded border-border accent-accent w-4 h-4"
-          />
-        </label>
+          <ToggleSwitch checked={settings.notifications} onChange={(v) => updateSettings({ notifications: v })} />
+        </div>
       </div>
     </div>
   );
@@ -259,11 +271,8 @@ function ModelSection() {
                 key={m}
                 className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-bg-secondary text-sm group"
               >
-                <span className={`text-text-primary truncate ${m === settings.model ? "font-medium" : ""}`}>
+                <span className="text-text-primary truncate">
                   {m}
-                  {m === settings.model && (
-                    <span className="ml-2 text-xs text-accent">{t("settings.active")}</span>
-                  )}
                   {m === settings.defaultModel && (
                     <span className="ml-2 text-xs text-warning">{t("settings.defaultModel")}</span>
                   )}
@@ -315,21 +324,24 @@ function ModelSection() {
         </label>
         <div className="space-y-2">
           {([
-            ["haikuModel", t("settings.haikuModel"), "claude-haiku-4-5-20251001"],
-            ["sonnetModel", t("settings.sonnetModel"), "claude-sonnet-4-20250514"],
-            ["opusModel", t("settings.opusModel"), "claude-opus-4-7"],
-          ] as const).map(([field, label, placeholder]) => (
+            ["haikuModel", t("settings.haikuModel")],
+            ["sonnetModel", t("settings.sonnetModel")],
+            ["opusModel", t("settings.opusModel")],
+          ] as const).map(([field, label]) => (
             <div key={field} className="flex items-center gap-2">
               <span className="text-xs text-text-secondary w-14 shrink-0">{label}</span>
-              <input
-                type="text"
+              <select
                 value={(settings as any)[field] || ""}
                 onChange={(e) => updateSettings({ [field]: e.target.value })}
-                placeholder={placeholder}
                 className="flex-1 rounded-lg bg-input-bg border border-border px-3 py-1.5 text-sm
-                           text-text-primary placeholder:text-text-muted
+                           text-text-primary
                            focus:outline-none focus:ring-2 focus:ring-accent/50"
-              />
+              >
+                <option value="">{t("settings.tierModelDefault")}</option>
+                {settings.models.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
             </div>
           ))}
         </div>
@@ -527,28 +539,18 @@ function LarkSettingsSection() {
       </div>
 
       <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-1.5">
-          <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-            <input
-              type="checkbox"
-              checked={config.autoConnect}
-              onChange={(e) => updateConfig({ autoConnect: e.target.checked })}
-              className="rounded border-border"
-            />
-            {t("lark.autoConnect")}
-          </label>
-          <label className="flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
-            <input
-              type="checkbox"
-              checked={config.notifyOnComplete ?? false}
-              onChange={(e) => updateConfig({ notifyOnComplete: e.target.checked })}
-              className="rounded border-border"
-            />
-            <span>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2.5">
+            <ToggleSwitch checked={config.autoConnect} onChange={(v) => updateConfig({ autoConnect: v })} />
+            <span className="text-xs text-text-secondary">{t("lark.autoConnect")}</span>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <ToggleSwitch checked={config.notifyOnComplete ?? false} onChange={(v) => updateConfig({ notifyOnComplete: v })} />
+            <span className="text-xs text-text-secondary">
               {t("lark.notifyOnComplete")}
               <span className="text-text-muted ml-1">— {t("lark.notifyOnCompleteHint")}</span>
             </span>
-          </label>
+          </div>
         </div>
 
         <button

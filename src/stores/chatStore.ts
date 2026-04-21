@@ -82,6 +82,7 @@ interface ChatState {
 
 const SESSIONS_KEY = "sessions";
 const MESSAGES_KEY_PREFIX = "msgs-";
+const ANSWERED_TOOLS_KEY = "answered-tools";
 
 // ── Legacy localStorage keys (for migration) ───────────────────────
 
@@ -118,6 +119,18 @@ async function loadMessagesFromFile(sessionId: string): Promise<ChatMessage[]> {
 
 function saveMessages(sessionId: string, msgs: ChatMessage[]) {
   storageWrite(MESSAGES_KEY_PREFIX + sessionId, JSON.stringify(msgs)).catch(() => {});
+}
+
+async function loadAnsweredTools(): Promise<Record<string, AnsweredToolData>> {
+  try {
+    const data = await withTimeout(storageRead(ANSWERED_TOOLS_KEY), 5000);
+    if (data) return JSON.parse(data);
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveAnsweredTools(tools: Record<string, AnsweredToolData>) {
+  storageWrite(ANSWERED_TOOLS_KEY, JSON.stringify(tools)).catch(() => {});
 }
 
 function removeMessages(sessionId: string) {
@@ -288,10 +301,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }
 
+    // 4. Load answered tools
+    const answeredTools = await loadAnsweredTools();
+
     set({
       sessions,
       currentSessionId: null,
       messages,
+      answeredTools,
       loaded: true,
     });
   },
@@ -737,7 +754,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   }),
   clearError: () => set({ streamError: null }),
   clearPendingInteraction: () => set({ pendingInteraction: null }),
-  setToolAnswered: (toolUseId, data) => set({
-    answeredTools: { ...get().answeredTools, [toolUseId]: data },
-  }),
+  setToolAnswered: (toolUseId, data) => {
+    const answeredTools = { ...get().answeredTools, [toolUseId]: data };
+    set({ answeredTools });
+    saveAnsweredTools(answeredTools);
+  },
 }));

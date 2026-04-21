@@ -953,24 +953,15 @@ pub async fn send_message(
                         .map(|u| ("ANTHROPIC_BASE_URL".to_string(), u.to_string()))
                         .into_iter()
                 )
-                .chain(
-                    request.haiku_model.as_deref()
-                        .filter(|s| !s.is_empty())
-                        .map(|m| ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), m.to_string()))
-                        .into_iter()
-                )
-                .chain(
-                    request.sonnet_model.as_deref()
-                        .filter(|s| !s.is_empty())
-                        .map(|m| ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), m.to_string()))
-                        .into_iter()
-                )
-                .chain(
-                    request.opus_model.as_deref()
-                        .filter(|s| !s.is_empty())
-                        .map(|m| ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), m.to_string()))
-                        .into_iter()
-                )
+                .chain({
+                    let fallback = request.model.as_deref().filter(|s| !s.is_empty());
+                    let haiku = request.haiku_model.as_deref().filter(|s| !s.is_empty()).or(fallback);
+                    let sonnet = request.sonnet_model.as_deref().filter(|s| !s.is_empty()).or(fallback);
+                    let opus = request.opus_model.as_deref().filter(|s| !s.is_empty()).or(fallback);
+                    haiku.map(|m| ("ANTHROPIC_DEFAULT_HAIKU_MODEL".to_string(), m.to_string())).into_iter()
+                        .chain(sonnet.map(|m| ("ANTHROPIC_DEFAULT_SONNET_MODEL".to_string(), m.to_string())).into_iter())
+                        .chain(opus.map(|m| ("ANTHROPIC_DEFAULT_OPUS_MODEL".to_string(), m.to_string())).into_iter())
+                })
         )
         .env_remove("CLAUDECODE");
 
@@ -1952,4 +1943,29 @@ pub fn get_context_tokens(session_id: String, project_path: String) -> Option<u6
     }
 
     last_context
+}
+
+#[tauri::command]
+pub fn copy_image_to_clipboard(base64_png: String) -> Result<(), String> {
+    use base64::Engine as _;
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&base64_png)
+        .map_err(|e| format!("Invalid base64: {e}"))?;
+
+    let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+        .map_err(|e| format!("Invalid PNG: {e}"))?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Clipboard init failed: {e}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width: w as usize,
+            height: h as usize,
+            bytes: std::borrow::Cow::Owned(rgba.into_raw()),
+        })
+        .map_err(|e| format!("Clipboard write failed: {e}"))?;
+    Ok(())
 }

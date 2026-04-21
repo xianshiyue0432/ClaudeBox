@@ -106,11 +106,11 @@ const en: TranslationDict = {
 
   // Settings — Model Tiers & Effort
   "settings.tierModels": "Model Tier Defaults",
-  "settings.tierModelsHint": "Claude automatically selects model tiers for subtasks. Configure which model to use for each tier.",
+  "settings.tierModelsHint": "Claude automatically selects model tiers for subtasks. If not configured, falls back to the session model.",
   "settings.haikuModel": "Haiku",
   "settings.sonnetModel": "Sonnet",
   "settings.opusModel": "Opus",
-  "settings.tierPlaceholder": "Leave empty to use default",
+  "settings.tierModelDefault": "Default (fallback to session model)",
   "settings.effort": "Effort Level",
   "settings.effortHint": "Controls reasoning depth. Higher effort = more intelligence, slower response.",
   "effort.low": "Low",
@@ -172,6 +172,11 @@ const en: TranslationDict = {
   // FileViewer
   "viewer.lines": "lines",
   "viewer.copyContent": "Copy content",
+  "message.share": "Share",
+  "message.shareAsText": "Share as text",
+  "message.shareAsImage": "Share as image",
+  "message.copied": "Copied",
+  "message.generating": "Generating…",
   "viewer.close": "Close",
   "viewer.closeAll": "Close all tabs",
   "viewer.minimize": "Hide file preview",
@@ -395,11 +400,11 @@ const zh: TranslationDict = {
 
   // Settings — Model Tiers & Effort
   "settings.tierModels": "模型层级默认值",
-  "settings.tierModelsHint": "Claude 会自动为子任务选择模型层级。可配置每个层级使用的模型。",
+  "settings.tierModelsHint": "Claude 会自动为子任务选择模型层级。未配置时回退到会话模型。",
   "settings.haikuModel": "Haiku",
   "settings.sonnetModel": "Sonnet",
   "settings.opusModel": "Opus",
-  "settings.tierPlaceholder": "留空使用默认模型",
+  "settings.tierModelDefault": "默认（回退到会话模型）",
   "settings.effort": "推理等级",
   "settings.effortHint": "控制推理深度。等级越高 = 越智能，响应越慢。",
   "effort.low": "Low",
@@ -461,6 +466,11 @@ const zh: TranslationDict = {
   // FileViewer
   "viewer.lines": "行",
   "viewer.copyContent": "复制内容",
+  "message.share": "分享",
+  "message.shareAsText": "分享为文字",
+  "message.shareAsImage": "分享为图片",
+  "message.copied": "已复制",
+  "message.generating": "生成中…",
   "viewer.close": "关闭",
   "viewer.closeAll": "关闭所有标签",
   "viewer.minimize": "隐藏文件预览",

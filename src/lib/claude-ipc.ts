@@ -237,6 +237,11 @@ export async function saveClipboardImage(data: string, filename: string): Promis
   return invoke("save_clipboard_image", { data, filename });
 }
 
+/** Copy a PNG image (raw base64, no data-URL prefix) to the system clipboard */
+export async function copyImageToClipboard(base64Png: string): Promise<void> {
+  return invoke("copy_image_to_clipboard", { base64Png });
+}
+
 export async function getContextTokens(sessionId: string, projectPath: string): Promise<number | null> {
   return invoke("get_context_tokens", { sessionId, projectPath });
 }
