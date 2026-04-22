@@ -269,6 +269,14 @@ const en: TranslationDict = {
   "lark.notifyOnCompleteHint": "Push the last message to Lark when a task finishes.",
   "lark.missingCredentials": "Please enter App ID and App Secret.",
   "lark.hint": "Connect a Lark bot to remotely control Claude Code from your phone or any Lark client — send coding tasks, review results, and manage projects on the go via WebSocket (no public URL needed).",
+  "lark.setupTitle": "Required setup in Lark Developer Console",
+  "lark.setupScopes": "Scopes",
+  "lark.setupScopesValue": "im:message, im:message:send_as_bot",
+  "lark.setupEvents": "Event subscriptions",
+  "lark.setupEventsValue": "im.message.receive_v1 (Receive message)",
+  "lark.setupConnection": "Event delivery",
+  "lark.setupConnectionValue": "Enable \"Long connection (WebSocket)\" mode",
+  "lark.setupLink": "Open Lark Developer Console",
 
   // Install Wizard
   "install.title": "One-click Install",
@@ -563,6 +571,14 @@ const zh: TranslationDict = {
   "lark.notifyOnCompleteHint": "任务完成时将最后一条消息推送到飞书。",
   "lark.missingCredentials": "请输入 App ID 和 App Secret。",
   "lark.hint": "配置飞书机器人后，可通过手机或任意飞书客户端远程操控 Claude Code —— 发送编码任务、查看执行结果、管理项目，随时随地 Remote Coding。使用 WebSocket 长连接，无需公网地址。",
+  "lark.setupTitle": "需要在飞书开放平台配置以下内容",
+  "lark.setupScopes": "权限 (Scopes)",
+  "lark.setupScopesValue": "im:message、im:message:send_as_bot",
+  "lark.setupEvents": "事件订阅",
+  "lark.setupEventsValue": "im.message.receive_v1（接收消息）",
+  "lark.setupConnection": "事件推送方式",
+  "lark.setupConnectionValue": "开启「长连接（WebSocket）」模式",
+  "lark.setupLink": "打开飞书开放平台",
 
   // Install Wizard
   "install.title": "一键安装",

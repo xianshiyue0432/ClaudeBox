@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   X, CheckCircle, XCircle, Loader2, Plus, Trash2, Bot,
-  Monitor, Cpu, BarChart2, Info, ScrollText, RefreshCw, Star,
+  Monitor, Cpu, BarChart2, Info, ScrollText, RefreshCw, Star, ChevronDown, ExternalLink,
 } from "lucide-react";
+import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useLarkStore, type LarkStatus } from "../../stores/larkStore";
 import { checkClaudeInstalled, checkModelAvailable, checkNodeVersion } from "../../lib/claude-ipc";
@@ -330,18 +331,25 @@ function ModelSection() {
           ] as const).map(([field, label]) => (
             <div key={field} className="flex items-center gap-2">
               <span className="text-xs text-text-secondary w-14 shrink-0">{label}</span>
-              <select
-                value={(settings as any)[field] || ""}
-                onChange={(e) => updateSettings({ [field]: e.target.value })}
-                className="flex-1 rounded-lg bg-input-bg border border-border px-3 py-1.5 text-sm
-                           text-text-primary
-                           focus:outline-none focus:ring-2 focus:ring-accent/50"
-              >
-                <option value="">{t("settings.tierModelDefault")}</option>
-                {settings.models.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+              <div className="relative flex-1">
+                <select
+                  value={(settings as any)[field] || ""}
+                  onChange={(e) => updateSettings({ [field]: e.target.value })}
+                  className="appearance-none w-full rounded-lg bg-input-bg border border-border pl-3 pr-9 py-1.5 text-sm
+                             text-text-primary cursor-pointer
+                             focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent/50
+                             hover:border-border-hover transition-colors"
+                >
+                  <option value="">{t("settings.tierModelDefault")}</option>
+                  {settings.models.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -538,8 +546,8 @@ function LarkSettingsSection() {
         />
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-col gap-3 min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
             <ToggleSwitch checked={config.autoConnect} onChange={(v) => updateConfig({ autoConnect: v })} />
             <span className="text-xs text-text-secondary">{t("lark.autoConnect")}</span>
@@ -556,7 +564,7 @@ function LarkSettingsSection() {
         <button
           onClick={handleToggle}
           disabled={larkConnecting}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5
+          className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5
             ${isRunning
               ? "bg-error/10 text-error hover:bg-error/20 border border-error/30"
               : "bg-accent text-white hover:bg-accent-hover"
@@ -576,6 +584,33 @@ function LarkSettingsSection() {
       <p className="text-[10px] text-text-muted">
         {t("lark.hint")}
       </p>
+
+      <div className="rounded-lg border border-border bg-bg-tertiary/30 px-3 py-2.5 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs font-medium text-text-secondary">{t("lark.setupTitle")}</span>
+          <button
+            onClick={() => shellOpen("https://open.feishu.cn/app").catch(console.error)}
+            className="flex items-center gap-1 text-[10px] text-accent hover:text-accent-hover transition-colors"
+          >
+            {t("lark.setupLink")}
+            <ExternalLink size={10} />
+          </button>
+        </div>
+        <ul className="space-y-1 text-[11px] text-text-muted">
+          <li>
+            <span className="text-text-secondary">{t("lark.setupScopes")}：</span>
+            <code className="text-text-primary/80 bg-bg-primary/50 px-1 py-0.5 rounded text-[10px]">{t("lark.setupScopesValue")}</code>
+          </li>
+          <li>
+            <span className="text-text-secondary">{t("lark.setupEvents")}：</span>
+            <code className="text-text-primary/80 bg-bg-primary/50 px-1 py-0.5 rounded text-[10px]">{t("lark.setupEventsValue")}</code>
+          </li>
+          <li>
+            <span className="text-text-secondary">{t("lark.setupConnection")}：</span>
+            <span className="text-text-primary/80">{t("lark.setupConnectionValue")}</span>
+          </li>
+        </ul>
+      </div>
     </div>
   );
 }

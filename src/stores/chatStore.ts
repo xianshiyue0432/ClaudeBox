@@ -37,7 +37,16 @@ export interface Session {
   claudeSessionId?: string;
 }
 
-export const DEFAULT_TOOLS = ["Write", "Edit", "Bash", "WebFetch", "WebSearch", "NotebookEdit", "Agent", "MCP"];
+export const DEFAULT_TOOLS = ["Read", "Glob", "Grep", "TodoWrite", "Write", "Edit", "Bash", "WebFetch", "WebSearch", "NotebookEdit", "Agent", "MCP"];
+
+const AUTO_MERGE_TOOLS = ["Read", "Glob", "Grep", "TodoWrite"];
+
+function mergeAllowedTools(existing: string[] | undefined): string[] {
+  const base = existing ?? DEFAULT_TOOLS;
+  const set = new Set(base);
+  for (const t of AUTO_MERGE_TOOLS) set.add(t);
+  return Array.from(set);
+}
 
 interface ChatState {
   sessions: Session[];
@@ -98,7 +107,7 @@ async function loadSessionsFromFile(): Promise<Session[]> {
       const sessions: Session[] = JSON.parse(data);
       return sessions.map((s) => ({
         ...s,
-        allowedTools: s.allowedTools ?? DEFAULT_TOOLS,
+        allowedTools: mergeAllowedTools(s.allowedTools),
       }));
     }
   } catch { /* ignore */ }
@@ -146,7 +155,7 @@ function loadSessionsFromLocalStorage(): Session[] {
       const sessions: Session[] = JSON.parse(stored);
       return sessions.map((s) => ({
         ...s,
-        allowedTools: s.allowedTools ?? DEFAULT_TOOLS,
+        allowedTools: mergeAllowedTools(s.allowedTools),
       }));
     }
   } catch { /* ignore */ }
