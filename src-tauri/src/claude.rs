@@ -465,7 +465,14 @@ fn resolve_bridge_path() -> Result<String, String> {
                 return Ok(clean_path(up_path));
             }
 
-            // 2d. Flat fallback: bridge.bundle.mjs in the same directory as binary
+            // 2d. Portable fallback: sidecar/bridge.bundle.mjs in the same directory as binary
+            let portable_path = parent.join("sidecar").join("bridge.bundle.mjs");
+            checked.push(format!("portable: {}", portable_path.display()));
+            if portable_path.exists() {
+                return Ok(clean_path(portable_path));
+            }
+
+            // 2e. Flat fallback: bridge.bundle.mjs in the same directory as binary
             let same_dir = parent.join("bridge.bundle.mjs");
             checked.push(format!("flat: {}", same_dir.display()));
             if same_dir.exists() {
@@ -516,6 +523,13 @@ pub fn resolve_sidecar_path(dev_name: &str, bundle_name: &str) -> Result<String,
             checked.push(format!("win/linux(_up_): {}", up_path.display()));
             if up_path.exists() {
                 return Ok(clean_path(up_path));
+            }
+
+            // Portable fallback: sidecar/{bundle_name} in the same directory as binary
+            let portable_path = parent.join("sidecar").join(bundle_name);
+            checked.push(format!("portable: {}", portable_path.display()));
+            if portable_path.exists() {
+                return Ok(clean_path(portable_path));
             }
 
             // Flat fallback
@@ -611,6 +625,7 @@ pub struct SendMessageRequest {
     pub allowed_tools: Option<Vec<String>>,
     pub api_key: Option<String>,
     pub base_url: Option<String>,
+    pub provider_id: Option<String>,
     pub attachments: Option<Vec<Attachment>>,
     /// Claude session ID for --resume (persisted across app restarts by frontend)
     pub resume_id: Option<String>,
@@ -799,7 +814,102 @@ pub async fn check_model_available(
     model: String,
     api_key: Option<String>,
     base_url: Option<String>,
+    provider_id: Option<String>,
 ) -> Result<(), String> {
+    fn extract_error_message(value: &serde_json::Value) -> Option<String> {
+        if let Some(msg) = value
+            .pointer("/error/message")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(msg.to_string());
+        }
+
+        if let Some(msg) = value
+            .pointer("/error/detail")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(msg.to_string());
+        }
+
+        if let Some(msg) = value
+            .get("message")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(msg.to_string());
+        }
+
+        if let Some(msg) = value
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(msg.to_string());
+        }
+
+        if let Some(msg) = value
+            .get("error_description")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+        {
+            return Some(msg.to_string());
+        }
+
+        if let Some(error) = value.get("error") {
+            if let Some(msg) = error
+                .get("message")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+            {
+                return Some(msg.to_string());
+            }
+            if let Some(msg) = error
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+            {
+                return Some(msg.to_string());
+            }
+            if let Some(msg) = error
+                .get("error")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+            {
+                return Some(msg.to_string());
+            }
+            if let Some(obj) = error.as_object() {
+                for (key, value) in obj {
+                    if let Some(msg) = value.as_str().filter(|s| !s.trim().is_empty()) {
+                        return Some(format!("{}: {}", key, msg));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    fn status_hint(status_str: &str) -> Option<&'static str> {
+        match status_str {
+            "400" => Some("bad request"),
+            "401" => Some("unauthorized (API key missing or invalid)"),
+            "403" => Some("forbidden"),
+            "404" => Some("endpoint or model not found"),
+            "408" => Some("request timed out"),
+            "409" => Some("conflict"),
+            "413" => Some("payload too large"),
+            "415" => Some("unsupported media type"),
+            "429" => Some("rate limited"),
+            "500" => Some("server error"),
+            "502" => Some("bad gateway"),
+            "503" => Some("service unavailable"),
+            "504" => Some("gateway timeout"),
+            _ => None,
+        }
+    }
+
     let key = api_key
         .filter(|s| !s.is_empty())
         .or_else(|| get_shell_env().get("ANTHROPIC_API_KEY").cloned())
@@ -816,28 +926,90 @@ pub async fn check_model_available(
         "messages": [{"role": "user", "content": "hi"}]
     });
 
-    let key_header = format!("x-api-key: {}", key);
     let body_str = body.to_string();
+
+    // Helper function to detect provider from URL
+    fn detect_provider_from_url(url: &str) -> Option<&'static str> {
+        let lower = url.to_lowercase();
+        if lower.contains("kimi.com") || lower.contains("kimi") {
+            return Some("kimi");
+        }
+        if lower.contains("volces.com") || lower.contains("volcengine") {
+            return Some("volcengine");
+        }
+        if lower.contains("minimax") {
+            return Some("minimax");
+        }
+        None
+    }
+
+    // Providers using "Authorization: Bearer <key>" auth:
+    // - Kimi Code (kimi)
+    // - Volcengine (volcengine) — uses compatible Anthropic endpoint
+    // - MiniMax (minimax)
+    let effective_provider = provider_id.as_deref()
+        .filter(|s| !s.is_empty() && *s != "custom")
+        .or_else(|| detect_provider_from_url(&url))
+        .unwrap_or("anthropic");
+    
+    let auth_header = if effective_provider == "kimi"
+        || effective_provider == "volcengine"
+        || effective_provider == "minimax"
+    {
+        format!("Authorization: Bearer {}", key)
+    } else {
+        format!("x-api-key: {}", key)
+    };
 
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = command_with_path("curl")
-            .args([
-                "-s", "-w", "\n%{http_code}",
-                "-H", &key_header,
-                "-H", "anthropic-version: 2023-06-01",
-                "-H", "content-type: application/json",
-                "-d", &body_str,
-                &endpoint,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output();
+        // Use raw curl on Windows to avoid cmd.exe escaping issues with % in -w format.
+        // On Windows: use curl.exe directly without cmd /C wrapper.
+        #[cfg(windows)]
+        let mut cmd = {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let mut c = Command::new("curl");
+            c.creation_flags(CREATE_NO_WINDOW);
+            c
+        };
+        #[cfg(not(windows))]
+        let mut cmd = Command::new("curl");
+
+        cmd.args([
+            "-sS", "-L",
+            "-w", "\n%{http_code}",
+            "-H", &auth_header,
+            "-H", "anthropic-version: 2023-06-01",
+            "-H", "content-type: application/json",
+            "-d", &body_str,
+            &endpoint,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+        let result = cmd.output();
         let _ = tx.send(result);
     });
 
     match rx.recv_timeout(std::time::Duration::from_secs(15)) {
         Ok(Ok(output)) => {
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let detail = if !stderr.is_empty() {
+                    stderr
+                } else if !stdout.is_empty() {
+                    stdout
+                } else {
+                    match output.status.code() {
+                        Some(code) => format!("curl exited with code {}", code),
+                        None => "curl failed without an exit code".to_string(),
+                    }
+                };
+                return Err(format!("Failed to check model: {}", detail));
+            }
+
             let text = String::from_utf8_lossy(&output.stdout);
             let text = text.trim();
             // Last line is the HTTP status code (from -w '%{http_code}')
@@ -845,22 +1017,44 @@ pub async fn check_model_available(
                 Some(pos) => (&text[..pos], text[pos + 1..].trim()),
                 None => ("", text),
             };
-            match status_str {
-                "200" => Ok(()),
-                _ => {
-                    // Try to parse error message from response body
-                    if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(body_part) {
-                        if let Some(msg) = err_json
-                            .get("error")
-                            .and_then(|e| e.get("message"))
-                            .and_then(|m| m.as_str())
-                        {
-                            return Err(msg.to_string());
-                        }
+
+            if status_str.starts_with('2') {
+                return Ok(());
+            }
+
+            let body_part = body_part.trim();
+            if !body_part.is_empty() {
+                if let Ok(err_json) = serde_json::from_str::<serde_json::Value>(body_part) {
+                    if let Some(msg) = extract_error_message(&err_json) {
+                        return Err(msg);
                     }
-                    Err(format!("API returned HTTP {}", status_str))
+
+                    let preview = serde_json::to_string(&err_json).unwrap_or_default();
+                    if !preview.is_empty() {
+                        return Err(format!(
+                            "HTTP {}: {}",
+                            status_str,
+                            preview.chars().take(400).collect::<String>()
+                        ));
+                    }
+                } else {
+                    return Err(format!(
+                        "HTTP {}: {}",
+                        status_str,
+                        body_part.chars().take(400).collect::<String>()
+                    ));
                 }
             }
+
+            if let Some(hint) = status_hint(status_str) {
+                return Err(format!("HTTP {} ({})", status_str, hint));
+            }
+
+            if status_str.is_empty() {
+                return Err("API returned HTTP with no status code".to_string());
+            }
+
+            Err(format!("API returned HTTP {}", status_str))
         }
         Ok(Err(e)) => Err(format!("Failed to check model: {}", e)),
         Err(_) => Err("Model check timed out (15s)".to_string()),
@@ -924,6 +1118,9 @@ pub async fn send_message(
         "locale": request.locale.as_deref().unwrap_or(""),
         "effort": request.effort.as_deref().unwrap_or(""),
         "contextWindow": request.context_window.as_deref().unwrap_or(""),
+        "apiKey": request.api_key.as_deref().unwrap_or(""),
+        "baseUrl": request.base_url.as_deref().unwrap_or(""),
+        "providerId": request.provider_id.as_deref().unwrap_or(""),
     });
 
     emit_debug(&app, &session_id, "process", &format!("$ node {} (start: prompt=\"{}\")",

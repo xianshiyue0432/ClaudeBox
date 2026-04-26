@@ -833,7 +833,8 @@ export default function MessageBubble({
 
   if (isUser) {
     // Skip user messages that only contain tool_result blocks (internal, not user-typed)
-    const hasText = message.content.some((b) => b.type === "text" && b.text);
+    const safeContent = Array.isArray(message.content) ? message.content : [];
+    const hasText = safeContent.some((b) => b.type === "text" && b.text);
     if (!hasText) return null;
 
     const imageAtts = message.attachments?.filter((a) => a.type === "image") || [];
@@ -994,7 +995,20 @@ export default function MessageBubble({
     const hasContentAfter = allMessages.slice(messageIndex + 1).some(
       (m) => m.role === "assistant" && m.streamMessageId !== "__launch__"
     );
-    const launched = !message.isStreaming || hasContentAfter;
+    // Hide launch message when there are real assistant messages after it
+    if (hasContentAfter) {
+      return null;
+    }
+    
+    // FIX: Also hide launch message if we have been in launched state for more than 10 seconds
+    // This prevents getting stuck on "Claude 已启动" indefinitely
+    const launchTime = message.timestamp;
+    const now = Date.now();
+    const launched = !message.isStreaming || (now - launchTime > 10000);
+    
+    // If we should be launched but UI still shows launching, force to launched state
+    const forceLaunched = message.isStreaming && (now - launchTime > 10000);
+    
     return (
       <div className="flex justify-start px-4 mb-1.5 mt-1">
         <div className="flex items-start gap-2.5 max-w-[90%] min-w-0">
@@ -1003,14 +1017,11 @@ export default function MessageBubble({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-bg-tertiary/40 border border-border/50">
-              {!launched && (
-                <Loader2 size={14} className="animate-spin text-accent flex-shrink-0" />
-              )}
-              {launched && (
+              {(!launched || forceLaunched) && (
                 <Rocket size={14} className="text-accent flex-shrink-0" />
               )}
               <div className="flex items-center gap-2 text-xs text-text-secondary flex-wrap">
-                <span>{launched ? t("chat.launched") : t("chat.launching")}</span>
+                <span>{launched || forceLaunched ? t("chat.launched") : t("chat.launching")}</span>
                 {info.pid && (
                   <span className="px-1.5 py-0.5 rounded bg-bg-tertiary text-text-muted text-[10px] font-mono">
                     PID {info.pid}
