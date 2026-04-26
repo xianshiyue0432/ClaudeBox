@@ -5,6 +5,7 @@ import { useTaskStore } from "../../stores/taskStore";
 import { sendMessage, stopSession, onStream, getGitBranch, listGitBranches, checkoutGitBranch, sendResponse, clearSessionResume, openInTerminal, gitDiffFiles, getContextTokens } from "../../lib/claude-ipc";
 import { larkSendCommand } from "../../lib/lark-ipc";
 import { useLarkStore } from "../../stores/larkStore";
+import { resolveModelCreds } from "../../lib/providers";
 import { getCurrentWindow, PhysicalSize } from "@tauri-apps/api/window";
 import { useT } from "../../lib/i18n";
 import { startWindowDrag } from "../../lib/utils";
@@ -38,19 +39,21 @@ function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hi
   for (let i = 0; i < msgs.length; i++) {
     const msg = msgs[i];
     if (msg.role !== "assistant") continue;
+    // Safety guard: content must be an array (Claude API sometimes returns string)
+    const content = Array.isArray(msg.content) ? msg.content : [];
     // If this message is already a child of another agent run, skip it as a parent.
     // Without this, a nested Agent tool_use (already hidden) would run its own inner loop
     // and incorrectly sweep subsequent text-only messages (visible break points) into hidden.
     if (hidden.has(i)) continue;
 
-    const agentBlock = msg.content.find(
+    const agentBlock = content.find(
       (b) => b.type === "tool_use" && b.name === "Agent"
     );
     if (!agentBlock?.id) continue;
 
     // The Agent's tool_result gets appended to THIS message (the parent)
     // by the stream parser, not to a child message.
-    const hasResult = msg.content.some(
+    const hasResult = content.some(
       (b) => b.type === "tool_result" && b.tool_use_id === agentBlock.id
     );
 
@@ -66,7 +69,8 @@ function detectAgentRuns(msgs: ChatMessage[]): { runs: Map<number, AgentRun>; hi
 
       if (hasResult && maxChildren === Infinity) {
         const INTERACTIVE_TOOLS = new Set(["ExitPlanMode", "AskUserQuestion"]);
-        const toolUseBlocks = child.content.filter((b) => b.type === "tool_use");
+        const childContent = Array.isArray(child.content) ? child.content : [];
+        const toolUseBlocks = childContent.filter((b) => b.type === "tool_use");
         const childHasToolUse = toolUseBlocks.length > 0;
         if (!childHasToolUse) break; // parent's continuation (text/thinking only)
         // If the only tool_use blocks are interactive tools (ExitPlanMode / AskUserQuestion),
@@ -475,7 +479,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
   >({});
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
-  const [contextTokens, setContextTokens] = useState<number | null>(null);
+  const [contextTokensCache, setContextTokensCache] = useState<Record<string, number>>({});
   const [fileTreeRefreshKey, setFileTreeRefreshKey] = useState(0);
   const toolNameMapRef = useRef<Map<string, string>>(new Map());
 
@@ -539,15 +543,20 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     return () => clearInterval(timer);
   }, [currentSession?.projectPath]);
 
-  // Poll context tokens from JSONL session file every 5s
+  // Poll context tokens from JSONL session file every 5s.
+  // Cache per session so switching sessions doesn't clear the bar (avoids flash).
   useEffect(() => {
-    setContextTokens(null);
     const sessionId = currentSession?.claudeSessionId;
     const projectPath = currentSession?.projectPath;
     if (!sessionId || !projectPath) return;
+    const key = `${sessionId}|${projectPath}`;
     const refresh = () => {
       getContextTokens(sessionId, projectPath)
-        .then((tokens) => { if (tokens != null) setContextTokens(tokens); })
+        .then((tokens) => {
+          if (tokens != null) {
+            setContextTokensCache((prev) => (prev[key] === tokens ? prev : { ...prev, [key]: tokens }));
+          }
+        })
         .catch(() => {});
     };
     refresh();
@@ -635,6 +644,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
       clearError();
       try {
         const resumeId = currentSession.claudeSessionId || undefined;
+        const creds = resolveModelCreds(currentSession.model, settings.models, settings.apiKey, settings.baseUrl);
         const pid = await sendMessage({
           session_id: currentSessionId,
           message: content,
@@ -643,8 +653,9 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
           permission_mode: currentSession.permissionMode || undefined,
           claude_path: settings.claudePath || undefined,
           allowed_tools: currentSession.allowedTools ?? [],
-          api_key: settings.apiKey || undefined,
-          base_url: settings.baseUrl || undefined,
+          api_key: creds.apiKey || undefined,
+          base_url: creds.baseUrl || undefined,
+          provider_id: creds.providerId || undefined,
           attachments: attachments?.map((a) => ({
             path: a.path,
             name: a.name,
@@ -840,6 +851,12 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
     }
     return undefined;
   })();
+
+  const contextTokensKey =
+    currentSession?.claudeSessionId && currentSession?.projectPath
+      ? `${currentSession.claudeSessionId}|${currentSession.projectPath}`
+      : null;
+  const contextTokens = contextTokensKey ? contextTokensCache[contextTokensKey] ?? null : null;
 
   // Compute duration from stream start
   const streamStartTime = currentSessionId ? streamStartTimes[currentSessionId] : undefined;
@@ -1067,7 +1084,7 @@ export default function ChatPanel({ claudeAvailable }: ChatPanelProps) {
             isStreaming={isStreaming}
             disabled={!claudeAvailable}
             model={currentSession?.model || ""}
-            models={settings.models}
+            models={settings.models.map((m) => m.id)}
             onModelChange={handleModelChange}
             gitBranch={gitBranch}
             projectPath={currentSession?.projectPath}

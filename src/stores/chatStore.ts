@@ -243,14 +243,32 @@ function appendNewBlocks(
       continue;
     }
 
-    const last = result[result.length - 1];
-    if (
-      block.type === "text" &&
-      last?.type === "text" &&
-      !block.id &&
-      !last.id
-    ) {
-      result[result.length - 1] = block;
+    // For streaming blocks without IDs, find and replace the LAST same-type block
+    // instead of only checking the final element. This handles the case where
+    // thinking and text deltas arrive in interleaved order.
+    if (!block.id && (block.type === "text" || block.type === "thinking")) {
+      // Search from end to find the last same-type block without an ID
+      let replaced = false;
+      for (let i = result.length - 1; i >= 0; i--) {
+        if (result[i].type === block.type && !result[i].id) {
+          result[i] = block; // Replace in place
+          replaced = true;
+          break;
+        }
+      }
+
+      // If no same-type block found, insert thinking before text (for display order)
+      if (!replaced && block.type === "thinking") {
+        // Find position: insert before the first text block to maintain thinking→text order
+        const firstTextIdx = result.findIndex((b) => b.type === "text");
+        if (firstTextIdx >= 0) {
+          result.splice(firstTextIdx, 0, block);
+        } else {
+          result.push(block);
+        }
+      } else if (!replaced) {
+        result.push(block);
+      }
       continue;
     }
 
@@ -466,6 +484,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       };
 
+      // FIX: Always finalize launch when receiving any assistant message
+      // This prevents getting stuck on "Claude 已启动" if system events don't arrive
+      if (event.type === "assistant" && event.message) {
+        finalizeLaunch();
+      }
+
       if (event.type === "system") {
         // Persist Claude session ID and skills for --resume across app restarts
         if (event.session_id) {
@@ -528,8 +552,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }
       }
 
+      // Normalize content to array — Claude API sometimes returns content as string
+      const normalizeContent = (raw: unknown): ContentBlock[] => {
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === "string") return [{ type: "text", text: raw }];
+        return [];
+      };
+
       if (event.type === "assistant" && event.message) {
-        const incomingContent: ContentBlock[] = event.message.content || [];
+        const incomingContent: ContentBlock[] = normalizeContent(event.message.content);
         const streamMsgId = event.message.id;
 
         finalizeLaunch();
@@ -582,21 +613,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         }
       } else if (event.type === "user" && event.message) {
-        const incomingContent: ContentBlock[] = event.message.content || [];
+        const incomingContent: ContentBlock[] = normalizeContent(event.message.content);
 
         for (const block of incomingContent) {
           if (block.type === "tool_result" && block.tool_use_id) {
             for (let i = msgs.length - 1; i >= 0; i--) {
               const msg = msgs[i];
               if (msg.role !== "assistant") continue;
-              const hasToolUse = msg.content.some(
+              const mContent = Array.isArray(msg.content) ? msg.content : [];
+              const hasToolUse = mContent.some(
                 (b) => b.type === "tool_use" && b.id === block.tool_use_id
               );
               if (hasToolUse) {
                 const updates: Partial<ChatMessage> = {
-                  content: [...msg.content, block],
+                  content: [...mContent, block],
                 };
-                const isAgent = msg.content.some(
+                const isAgent = mContent.some(
                   (b) => b.type === "tool_use" && b.id === block.tool_use_id && b.name === "Agent"
                 );
                 if (isAgent) {

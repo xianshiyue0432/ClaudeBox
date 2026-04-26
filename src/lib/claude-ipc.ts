@@ -25,6 +25,8 @@ export interface SendMessageRequest {
   haiku_model?: string;
   sonnet_model?: string;
   opus_model?: string;
+  /** Provider ID — used to select Bearer vs x-api-key auth */
+  provider_id?: string;
 }
 
 /** Send a message (spawns claude -p per message, with --resume for multi-turn). Returns PID. */
@@ -136,11 +138,13 @@ export async function checkModelAvailable(
   model: string,
   apiKey?: string,
   baseUrl?: string,
+  providerId?: string,
 ): Promise<void> {
   return invoke("check_model_available", {
     model,
     apiKey: apiKey ?? null,
     baseUrl: baseUrl ?? null,
+    providerId: providerId ?? null,
   });
 }
 

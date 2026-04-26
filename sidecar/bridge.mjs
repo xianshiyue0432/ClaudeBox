@@ -27,6 +27,361 @@ import { execSync, spawnSync } from "node:child_process";
 import { writeFileSync, mkdtempSync, chmodSync, unlinkSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join, extname } from "node:path";
+import { spawn } from "node:child_process";
+
+// Providers that use x-api-key (Anthropic-style) instead of Bearer token.
+// ALL third-party API proxies use Bearer auth — only official Anthropic uses x-api-key.
+const X_API_KEY_PROVIDERS = new Set(["anthropic"]);
+
+/**
+ * Detect provider from base URL (fallback when providerId is "custom").
+ * Only needs to distinguish Anthropic from third-party APIs for auth header selection.
+ * @param {string} baseUrl
+ * @returns {string|null}
+ */
+function detectProviderFromUrl(baseUrl) {
+  if (!baseUrl) return null;
+  const lower = baseUrl.toLowerCase();
+  // Official Anthropic API
+  if (lower.includes("anthropic.com") && !lower.includes("kimi")) {
+    return "anthropic";
+  }
+  // Any other URL → treat as third-party (will use Bearer auth)
+  return "third-party";
+}
+
+// Estimate token count (rough approximation)
+function estimateTokens(text) {
+  return Math.ceil(text.length / 4);
+}
+
+// Generate a session ID
+function generateSessionId() {
+  return `session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Build system prompt for workspace boundary and locale
+function buildSystemPrompt(cwd, locale) {
+  const root = cwd.replace(/\/+$/, "");
+  let appendText = `\n## Workspace Boundary (CRITICAL)\nProject root: ${root}\nALL file operations and Bash commands MUST stay within \`${root}/\`. NEVER create/modify files outside it. NEVER invent non-existent directories — verify with ls/Glob first. When unsure, ask the user.`;
+
+  const LOCALE_INSTRUCTIONS = {
+    zh: "\n\n## Language\nAlways respond in Chinese (简体中文). All explanations, comments in responses, and conversational text must be in Chinese. Code, file paths, and technical identifiers remain in their original language.",
+  };
+  if (locale && LOCALE_INSTRUCTIONS[locale]) {
+    appendText += LOCALE_INSTRUCTIONS[locale];
+  }
+  return appendText;
+}
+
+/**
+ * Build system prompt that includes model identity information.
+ * Third-party API proxies may strip or misreport the actual model identity,
+ * so we explicitly tell the model what it is.
+ */
+function buildSystemPromptWithIdentity(cwd, locale, model, providerId) {
+  let prompt = buildSystemPrompt(cwd, locale);
+
+  // Inject model identity to ensure correct self-identification
+  if (model) {
+    const displayName = providerId === "anthropic" ? model : `${model} (${providerId})`;
+    prompt += `\n\n## Identity\nYou are the AI model "${displayName}". When asked about your identity, model name, or version, always respond truthfully that you are "${model}". Do NOT claim to be Claude, GPT, or any other model.`;
+  }
+
+  return prompt;
+}
+
+// Handle streaming API calls with Bearer auth
+async function handleBearerAuthQuery({
+  prompt,
+  cwd,
+  model,
+  resume,
+  allowedTools,
+  locale,
+  effort,
+  contextWindow,
+  apiKey,
+  baseUrl,
+  providerId,
+  abortController,
+}) {
+  const sessionId = generateSessionId();
+  const maxTokens = Math.max(estimateTokens(prompt) * 2, 8192);
+
+  // Build the endpoint URL - handle providers that already include /v1 in their base URL
+  let baseEndpoint = baseUrl.replace(/\/+$/, "");
+  
+  // Special handling for Kimi: the base URL might already include the full path
+  const isKimi = providerId === "kimi";
+  if (isKimi) {
+    // Kimi API endpoint: https://api.kimi.com/v1/messages
+    // User might set baseUrl as "https://api.kimi.com" or "https://api.kimi.com/v1"
+    if (!baseEndpoint.includes("/v1") && !baseEndpoint.endsWith("/messages")) {
+      baseEndpoint += "/v1";
+    }
+  } else if (!baseEndpoint.includes("/v1") && !baseEndpoint.endsWith("/messages")) {
+    baseEndpoint += "/v1";
+  }
+  const endpoint = `${baseEndpoint}/messages`;
+
+  // Build system prompt (as a string for direct API calls)
+  // Note: The "preset" format with type/preset/append is SDK-internal,
+  // but third-party Anthropic-compatible APIs expect a plain string.
+  const systemPrompt = buildSystemPromptWithIdentity(cwd, locale, model, providerId);
+
+  // Build request body
+  const body = {
+    model,
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: [{ role: "user", content: prompt }],
+    stream: true,
+  };
+
+  // For Kimi/Moonshot compatibility: ensure model name is valid
+  if (isKimi) {
+    console.error(`[bridge] Kimi model requested: "${model}"`);
+    // Common Kimi model names: kimi-latest, moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k
+    // If user passes a Claude model name, it will fail - but we let the API return the error
+  }
+
+  const headers = {
+    "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+  };
+
+  // Use Bearer auth for all providers except Anthropic (which uses x-api-key)
+  // This ensures any new third-party provider works out-of-the-box
+  const useXApiKey = X_API_KEY_PROVIDERS.has(providerId);
+  if (useXApiKey) {
+    headers["x-api-key"] = apiKey;
+  } else {
+    headers["Authorization"] = `Bearer ${apiKey}`;
+  }
+
+  // Emit system init message
+  emit({
+    type: "system",
+    subtype: "init",
+    session_id: sessionId,
+    model,
+    cwd,
+    status: "authentication_confirmed",
+  });
+
+  console.error(`[bridge] === Bearer Auth Request ===`);
+  console.error(`[bridge] endpoint: ${endpoint}`);
+  console.error(`[bridge] model: ${model}`);
+  console.error(`[bridge] providerId: ${providerId}`);
+  console.error(`[bridge] apiKey present: ${!!apiKey}`);
+  console.error(`[bridge] baseUrl: ${baseUrl}`);
+  console.error(`[bridge] Request headers: ${JSON.stringify(headers)}`);
+  console.error(`[bridge] Request body: ${JSON.stringify(body)}`);
+  console.error(`[bridge] ==============================`);
+
+  // Timeout wrapper for fetch (5 minute timeout for long-running models like Kimi)
+  const timeoutMs = 300000;
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs)
+  );
+
+  let response;
+  try {
+    console.error(`[bridge] Starting fetch to ${endpoint}`);
+    console.error(`[bridge] Full request body: ${JSON.stringify(body)}`);
+    response = await Promise.race([
+      fetch(endpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+        signal: abortController.signal,
+      }),
+      timeoutPromise,
+    ]);
+    console.error(`[bridge] Fetch completed, status: ${response.status}`);
+    console.error(`[bridge] Response headers: ${JSON.stringify(Object.fromEntries(response.headers.entries()))}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMsg = `HTTP ${response.status}: ${errorText}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error?.message) {
+          errorMsg = errorJson.error.message;
+        } else if (errorJson.message) {
+          errorMsg = errorJson.message;
+        }
+      } catch {}
+      console.error(`[bridge] HTTP error response: ${errorMsg}`);
+      console.error(`[bridge] Raw error body: ${errorText.slice(0, 500)}`);
+      throw new Error(errorMsg);
+    }
+
+    console.error(`[bridge] Response OK, starting stream processing`);
+    // Handle streaming response
+    const reader = response.body.getReader();
+    let buffer = "";
+    let currentContent = "";
+    let currentThinking = "";  // Accumulate thinking content separately
+    let stopReason = null;
+    let messageId = `msg_${Date.now()}`;
+
+    // Read stream
+    const readStream = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = new TextDecoder().decode(value, { stream: true });
+        buffer += chunk;
+
+        // Process complete lines
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+
+          // Handle SSE format: "data:{...}" or "data: {...}" or plain NDJSON: "{...}"
+          // Note: Some APIs (e.g., Kimi) use "data:" WITHOUT space after the colon
+          let jsonStr = line;
+          if (line.startsWith("data:")) {
+            jsonStr = line.replace(/^data:\s*/, "");
+          } else if (!line.startsWith("{")) {
+            continue;
+          }
+
+          try {
+            const event = JSON.parse(jsonStr);
+            console.error(`[bridge] Received event type: ${event.type}, delta_type: ${event.delta?.type || "N/A"}`);
+            if (event.type === "message_start") {
+              messageId = event.message?.id || messageId;
+              console.error(`[bridge] Message started, id: ${messageId}, model: ${event.message?.model}`);
+            } else if (event.type === "content_block_start") {
+              // Assistant message start
+              console.error(`[bridge] Content block started, type: ${event.content_block?.type}`);
+            } else if (event.type === "content_block_delta") {
+              console.error(`[bridge] Content delta type: ${event.delta?.type}`);
+              if (event.delta?.type === "text_delta") {
+                currentContent += event.delta.text;
+                console.error(`[bridge] Text delta, content length: ${currentContent.length}`);
+
+                // Emit ONLY the text block — let chatStore's appendNewBlocks handle merging.
+                // This avoids sending [text, thinking] array every time which creates duplicate blocks.
+                emit({
+                  type: "assistant",
+                  message: {
+                    id: messageId,
+                    role: "assistant",
+                    content: [
+                      { type: "text", text: currentContent },
+                    ],
+                    model,
+                    stop_reason: null,
+                    usage: null,
+                  },
+                });
+              } else if (event.delta?.type === "thinking_delta") {
+                // Accumulate thinking content and emit as a single ContentBlock
+                currentThinking += event.delta.thinking || "";
+
+                // Emit ONLY the thinking block — chatStore will merge with existing thinking block
+                emit({
+                  type: "assistant",
+                  message: {
+                    id: messageId,
+                    role: "assistant",
+                    content: [
+                      { type: "thinking", thinking: currentThinking },
+                    ],
+                    model,
+                    stop_reason: null,
+                    usage: null,
+                  },
+                });
+              }
+            } else if (event.type === "content_block_stop") {
+              // Content block done
+              console.error(`[bridge] Content block stopped`);
+            } else if (event.type === "message_delta") {
+              if (event.delta?.stop_reason) {
+                stopReason = event.delta.stop_reason;
+                console.error(`[bridge] Stop reason: ${stopReason}`);
+              }
+            } else if (event.type === "message_stop") {
+              // Message complete
+              console.error(`[bridge] Message stopped`);
+            }
+          } catch (e) {
+            // Ignore parse errors for partial lines
+            console.error(`[bridge] Parse error: ${e.message}, line: ${line.slice(0, 100)}`);
+          }
+        }
+      }
+
+      // Final flush - emit complete message with proper content blocks
+      const finalContentBlocks = [];
+      if (currentThinking) {
+        finalContentBlocks.push({ type: "thinking", thinking: currentThinking });
+      }
+      if (currentContent) {
+        finalContentBlocks.push({ type: "text", text: currentContent });
+      }
+
+      // Emit final message
+      emit({
+        type: "assistant",
+        message: {
+          id: messageId,
+          role: "assistant",
+          content: finalContentBlocks.length > 0 ? finalContentBlocks : currentContent,
+          model,
+          stop_reason: stopReason,
+          usage: null,
+        },
+      });
+
+      // Emit result
+      emit({
+        type: "result",
+        subtype: "success",
+        session_id: sessionId,
+        result: { message: currentContent },
+        is_error: false,
+        total_cost_usd: 0,
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 1,
+      });
+      console.error(`[bridge] handleBearerAuthQuery completed successfully`);
+    };
+
+    await readStream();
+    console.error(`[bridge] readStream completed`);
+  } catch (err) {
+    console.error(`[bridge] ERROR: ${err.message}`);
+    console.error(`[bridge] Error name: ${err.name}`);
+    console.error(`[bridge] Error stack: ${err.stack}`);
+    if (err.name === "AbortError") {
+      emit({ type: "result", subtype: "aborted", is_error: false });
+    } else {
+      // Emit error event AND result event so frontend knows stream ended
+      emitError(`Bearer API error: ${err.message}`);
+      emit({
+        type: "result",
+        subtype: "error",
+        session_id: sessionId,
+        result: { message: "" },
+        is_error: true,
+        total_cost_usd: 0,
+        duration_ms: 0,
+        duration_api_ms: 0,
+        num_turns: 0,
+      });
+    }
+  }
+}
 
 // ── File attachment helpers ─────────────────────────────────────────
 
@@ -460,6 +815,10 @@ function findLatestPlanContent(cwd) {
 }
 
 async function main() {
+  // Startup diagnostic - emit immediately so we can see if bridge starts
+  console.error(`[bridge] BRIDGE_STARTING`);
+  process.stderr.write(`[bridge] BRIDGE_STARTING via stderr\n`);
+
   // Capture stderr from SDK internals for diagnostics
   const stderrChunks = [];
   const origStderrWrite = process.stderr.write.bind(process.stderr);
@@ -481,6 +840,9 @@ async function main() {
       }
     };
   });
+
+  console.error(`[bridge] STARTUP: Received start message type=${startMsg.type}`);
+  process.stderr.write(`[bridge] START_MESSAGE_RECEIVED\n`);
 
   if (startMsg.type !== "start" && startMsg.type !== "list_skills") {
     emitError(`Expected 'start' or 'list_skills' message, got '${startMsg.type}'`);
@@ -528,12 +890,52 @@ async function main() {
     locale,
     effort,
     contextWindow,
+    apiKey,
+    baseUrl,
+    providerId,
   } = startMsg;
 
   // Log config for diagnostics (to stderr, which Rust captures)
   console.error(`[bridge] model=${model || "(default)"} cwd=${cwd} permissionMode=${permissionMode || "(default)"} contextWindow=${contextWindow || "200k"}`);
-  console.error(`[bridge] ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY ? "set (" + process.env.ANTHROPIC_API_KEY.slice(0, 10) + "...)" : "NOT SET"}`);
-  console.error(`[bridge] ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL || "NOT SET"}`);
+  console.error(`[bridge] apiKey=${apiKey ? "set (" + apiKey.slice(0, 10) + "...)" : "NOT SET"}`);
+  console.error(`[bridge] baseUrl=${baseUrl || "NOT SET"}`);
+  console.error(`[bridge] providerId=${providerId || "NOT SET"}`);
+
+  // Detect provider from URL if not explicitly provided or is "custom"
+  const effectiveProviderId = (providerId && providerId !== "custom")
+    ? providerId
+    : (detectProviderFromUrl(baseUrl) || providerId || "anthropic");
+  console.error(`[bridge] effectiveProviderId=${effectiveProviderId}`);
+
+  // Check if this provider requires Bearer auth (all non-Anthropic providers)
+  const useBearerAuth = !X_API_KEY_PROVIDERS.has(effectiveProviderId) && apiKey && baseUrl;
+  console.error(`[bridge] Bearer auth check: providerId=${providerId}, effectiveProviderId=${effectiveProviderId}, hasKey=${!!apiKey}, hasUrl=${!!baseUrl}, useBearer=${useBearerAuth}`);
+
+  if (useBearerAuth) {
+    console.error(`[bridge] Using Bearer auth flow for ${effectiveProviderId}`);
+
+    const abortController = new AbortController();
+    activeAbort = abortController;
+
+    console.error(`[bridge] CALLING handleBearerAuthQuery now`);
+    await handleBearerAuthQuery({
+      prompt,
+      cwd,
+      model,
+      resume,
+      allowedTools,
+      locale,
+      effort,
+      contextWindow,
+      apiKey,
+      baseUrl,
+      providerId: effectiveProviderId,
+      abortController,
+    });
+    console.error(`[bridge] handleBearerAuthQuery returned, exiting`);
+
+    process.exit(0);
+  }
 
   // Run pre-flight diagnostics
   preflight();
